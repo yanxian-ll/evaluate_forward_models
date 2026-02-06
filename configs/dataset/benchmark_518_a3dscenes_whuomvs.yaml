@@ -1,0 +1,23 @@
+defaults:
+  - default
+
+# Number of views parameter for the multi-view datasets
+num_views: 2
+
+# Covisibility threshold for the multi-view datasets
+covisibility_thres_min: 0.1
+covisibility_thres_max: 1.0
+
+# Sampling mode for the multi-view datasets (random_walk or greddy_chain)
+sampling_mode: "random_walk" 
+
+# Test Resolution
+resolution_test_a3dscenes: ${dataset.resolution_options.518_1_52_ar}
+resolution_test_whuomvs: ${dataset.resolution_options.518_2_00_ar}
+
+# Test Set
+# A3dScenes: Sample 50 multi-view sets from each scene, 3 test scenes in total
+# WHU-OMVS: Sample 10 multi-view sets from the single scene, 3 test scenes in total
+test_dataset:
+  "+ 150 @ ${dataset.a3dscenes_wai.test.dataset_str}
+  + 30 @ ${dataset.whu_luojia_whuomvs_wai.test.dataset_str}"

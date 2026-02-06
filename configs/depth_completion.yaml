@@ -1,0 +1,41 @@
+defaults:
+  - machine: aws
+  - model: mapanything_v1
+  - override model/task: depth_completion
+  - _self_
+
+root_data_dir: ${machine.root_data_dir}
+root_experiments_dir: ${machine.root_experiments_dir}
+
+model:
+  pretrained: '${root_experiments_dir}/mapanything/training/mapa_finetuning_depth_completion/checkpoint-last.pth'
+
+hydra:
+  run:
+    dir: '${root_experiments_dir}/mapanything/calibration_benchmarking/single_scene/csu2026'
+output_dir: ${hydra:run.dir}
+
+batch_size: 8
+save_exr: true
+save_png: true
+
+# 推理分辨率（W,H）
+# resolution: [1022, 630]
+resolution: [518, 336]
+
+# 对齐模式：scale | affine
+align_mode: "affine"
+depth_thresholds: [0.5, 1.0, 2.0, 5.0]
+
+dataset_root: ${root_data_dir}/a3dscenes
+scene_name: "csu2026"
+modalities: ["image", "depth", "mask"]
+
+### Benchmarking args
+seed: 0
+disable_cudnn_benchmark: true
+amp: 1
+amp_dtype: "bf16"
+
+transform: "imgnorm"
+data_norm_type: "dinov2"   

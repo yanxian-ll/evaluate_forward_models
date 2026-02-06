@@ -1,0 +1,55 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hunyuanworld-mirror"
+version = "0.1"
+description = "HunyuanWorld-Mirror: A versatile feed-forward model for comprehensive 3D geometric prediction"
+readme = "README.md"
+requires-python = ">=3.10.0"
+dependencies = [
+    # training dependencies
+    "lightning>=2.5.0",
+    "hydra-core",
+    "tensorboardX",
+    "rootutils",
+    "h5py",
+    
+    # inference dependencies
+    "torchmetrics",
+    "pre-commit",
+    "rich==13.3.5",
+    "pytest",
+    "numpy",
+    "trimesh",
+    "roma",
+    "open3d",
+    "einops",
+    "gradio",
+    "matplotlib",
+    "tqdm",
+    "opencv-python",
+    "viser",
+    "pillow_heif",
+    "scipy",
+    "huggingface-hub[torch]>=0.22",
+    "ninja",
+    "jaxtyping",
+    "lpips",
+    "colorspacious",
+    "moviepy==1.0.3",
+    "plyfile",
+    "pycolmap==3.10.0",
+    "tyro",
+    "gsplat",
+]
+
+# Setuptools configuration - 使用简单的包结构
+[tool.setuptools]
+packages = ["hunyuanworld_mirror"]
+package-dir = {"hunyuanworld_mirror" = "src"}
+
+# Include package data
+[tool.setuptools.package-data]
+"hunyuanworld_mirror" = ["**/*"]
