@@ -15,8 +15,6 @@ batch_sizes_and_views=(
     "5 16 benchmark_518_a3dscenes_whuomvs"
     "3 24 benchmark_518_a3dscenes_whuomvs"
     "2 32 benchmark_518_a3dscenes_whuomvs"
-    "1 50 benchmark_518_a3dscenes_whuomvs"
-    "1 100 benchmark_518_a3dscenes_whuomvs"
 )
 
 # Loop through each combination

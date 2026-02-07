@@ -1,9 +1,0 @@
-model:
-  name: networks.anycalib_pretrained
-  model_id: anycalib_pinhole
-
-data:
-  im_geom_transform: null
-  preprocessing:
-    resize: null
-    edge_divisible_by: null

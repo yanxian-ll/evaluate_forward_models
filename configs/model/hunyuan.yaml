@@ -3,17 +3,19 @@ defaults:
   - task: images_only
 
 # String for model factory
-model_str: "pi3x"
+model_str: "hunyuan"
 # Model config
 model_config:
-  name: "pi3x"
+  name: "hunyuan"
+  # Torch hub force reload
+  torch_hub_force_reload: False
+  # HF model string
+  hf_model_name: "tencent/HunyuanWorld-Mirror"
   # Geometric input config
   geometric_input_config: ${model.task}
-  # PI3 model name or path
-  pretrained_model_name_or_path: "yyfz233/Pi3X"
 # Image Normalization Type
 data_norm_type: "identity"
-# Pi3 checkpoint is already loaded in the inference wrapper
+# Hunyuan checkpoint is already loaded in the inference wrapper
 pretrained: null
 # Torch hub force reload
 torch_hub_force_reload: False

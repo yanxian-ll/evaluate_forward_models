@@ -1,3 +1,0 @@
-model:
-  name: networks.deepcalib
-  weights: weights/deepcalib.tar
