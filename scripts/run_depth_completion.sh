@@ -11,5 +11,5 @@ python3 scripts/run_depth_completion.py \
   align_mode=affine \
   model=mapanything_v1 \
   model/task=depth_completion \
-  model.pretrained='${root_experiments_dir}/mapanything/training/mapa_finetuning_depth_completion/checkpoint-last.pth' \
-  hydra.run.dir='${root_experiments_dir}/mapanything/calibration_benchmarking/single_scene/csu2026'
+  model.pretrained='${root_experiments_dir}/mapanything/training/mapa_finetuning_depth_completion_v2/checkpoint-last.pth' \
+  hydra.run.dir='${root_experiments_dir}/mapanything/depth_completion/a3dscenes/csu2026'

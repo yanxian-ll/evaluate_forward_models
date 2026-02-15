@@ -10,11 +10,11 @@ export HYDRA_FULL_ERROR=1
 # Define the batch sizes and number of views to loop over
 batch_sizes_and_views=(
     "20 2 benchmark_518_a3dscenes_whuomvs"
-    "20 4 benchmark_518_a3dscenes_whuomvs"
-    "10 8 benchmark_518_a3dscenes_whuomvs"
-    "5 16 benchmark_518_a3dscenes_whuomvs"
-    "3 24 benchmark_518_a3dscenes_whuomvs"
-    "2 32 benchmark_518_a3dscenes_whuomvs"
+    "10 4 benchmark_518_a3dscenes_whuomvs"
+    "5 8 benchmark_518_a3dscenes_whuomvs"
+    "2 16 benchmark_518_a3dscenes_whuomvs"
+    "2 24 benchmark_518_a3dscenes_whuomvs"
+    "1 32 benchmark_518_a3dscenes_whuomvs"
 )
 
 # Loop through each combination
@@ -32,7 +32,6 @@ for combo in "${batch_sizes_and_views[@]}"; do
         dataset.num_views=$num_views \
         batch_size=$batch_size \
         model=hunyuan \
-        model.model_config.hf_model_name='checkpoints/HunyuanWorld-Mirror' \
         model/task=images_only \
         hydra.run.dir='${root_experiments_dir}/mapanything/benchmarking/dense_'"${num_views}"'_view/hunyuan'
 

@@ -8,7 +8,7 @@ model_str: "da3"
 model_config:
   name: "da3"
   # HF model string
-  hf_model_name: "depth-anything/DA3-GIANT-1.1"
+  hf_model_name: "checkpoints/da3"
   # Geometric input config
   geometric_input_config: ${model.task}
 # Image Normalization Type

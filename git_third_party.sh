@@ -24,12 +24,13 @@ git clone https://github.com/naver/must3r.git
 git clone https://github.com/yyfz/Pi3.git
 git clone https://github.com/Nik-V9/pow3r.git
 
-git clone --recurse-submodules https://github.com/Nik-V9/depth-anything-3.git
-cd depth-anything-3
-git submodule update --init --recursive
-cd ..
+# need change src code (included in thirdparty)
+# git clone --recurse-submodules https://github.com/Nik-V9/depth-anything-3.git
+# cd depth-anything-3
+# git submodule update --init --recursive
+# cd ..
 
-# need change code (included in thirdparty)
+# need change src code (included in thirdparty)
 # git clone https://github.com/Tencent-Hunyuan/HunyuanWorld-Mirror
 
 git clone https://github.com/infinity1096/robustmvd.git

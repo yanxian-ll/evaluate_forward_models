@@ -45,12 +45,12 @@ export HYDRA_FULL_ERROR=1
 
 # Define the batch sizes and number of views to loop over
 batch_sizes_and_views=(
+    "2 32 benchmark_518_a3dscenes_whuomvs"
     "20 2 benchmark_518_a3dscenes_whuomvs"
     "20 4 benchmark_518_a3dscenes_whuomvs"
     "10 8 benchmark_518_a3dscenes_whuomvs"
     "5 16 benchmark_518_a3dscenes_whuomvs"
     "3 24 benchmark_518_a3dscenes_whuomvs"
-    "2 32 benchmark_518_a3dscenes_whuomvs"
 )
 
 # Loop through each combination
@@ -67,10 +67,10 @@ for combo in "${batch_sizes_and_views[@]}"; do
         dataset.num_workers=12 \
         dataset.num_views=$num_views \
         batch_size=$batch_size \
-        model=mapanything \
+        model=mapanything_v1 \
         model/task=images_only \
         model.encoder.uses_torch_hub=false \
-        model.pretrained='checkpoints/mapa' \
+        model.pretrained='checkpoints/mapa/map-anything.pth' \
         hydra.run.dir='${root_experiments_dir}/mapanything/benchmarking/dense_'"${num_views}"'_view/mapa_24v'
 
     echo "Finished running $dataset with batch_size=$batch_size and num_views=$num_views"

@@ -42,12 +42,12 @@ export HYDRA_FULL_ERROR=1
 
 # Define the batch sizes and number of views to loop over
 batch_sizes_and_views=(
-    "20 2 benchmark_518_a3dscenes_whuomvs"
     "20 4 benchmark_518_a3dscenes_whuomvs"
     "10 8 benchmark_518_a3dscenes_whuomvs"
     "5 16 benchmark_518_a3dscenes_whuomvs"
     "3 24 benchmark_518_a3dscenes_whuomvs"
     "2 32 benchmark_518_a3dscenes_whuomvs"
+    "20 2 benchmark_518_a3dscenes_whuomvs"
 )
 
 # Loop through each combination

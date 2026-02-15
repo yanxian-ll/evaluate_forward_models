@@ -49,6 +49,9 @@ class HunyuanWrapper(torch.nn.Module):
             self.model = WorldMirror.from_pretrained(
                 self.hf_model_name, force_download=True
             )
+        
+        self.model.enable_gs = False
+        self.model.enable_norm = False
 
         # Get the dtype for HunyuanWorld-Mirror inference
         # bfloat16 is supported on Ampere GPUs (Compute Capability 8.0+)

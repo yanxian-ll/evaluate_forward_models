@@ -198,7 +198,11 @@ class Aggregator(nn.Module):
             # )
 
             ### Use pre-trained DINOv2 with gradient checkpointing
-            self.patch_embed = torch.hub.load("facebookresearch/dinov2", patch_embed)
+            try:
+                self.patch_embed = torch.hub.load("facebookresearch/dinov2", patch_embed, force_reload=False)
+            except: # load from cache
+                self.patch_embed = torch.hub.load("facebookresearch/dinov2", patch_embed)
+            
             for i in range(len(self.patch_embed.blocks)):
                 self.patch_embed.blocks[i] = (
                     self.wrap_module_with_gradient_checkpointing(

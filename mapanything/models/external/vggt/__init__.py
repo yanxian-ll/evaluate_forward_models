@@ -44,7 +44,7 @@ class VGGTWrapper(torch.nn.Module):
             # Load pre-trained weights
             if not torch_hub_force_reload:
                 # Initialize the 1B VGGT model from huggingface hub cache
-                print(f"Loading {pretrained_model_name_or_path} from huggingface cache ...")
+                print(f"Loading from {pretrained_model_name_or_path} ...")
                 self.model = VGGT.from_pretrained(
                     pretrained_model_name_or_path,
                 )

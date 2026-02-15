@@ -162,8 +162,14 @@ class A3DScenesWAI(BaseDataset):
 
             raw_image = view_data["image"].permute(1, 2, 0).numpy()  # (H,W,3)
             raw_image = (raw_image * 255).astype(np.uint8)
-
-            depthmap = view_data["depth"].numpy().astype(np.float32)
+            
+            if "depth" in self.load_modalities:
+                depthmap = view_data["depth"].numpy().astype(np.float32)
+            elif "depth_da3" in self.load_modalities:
+                depthmap = view_data["depth_da3"].numpy().astype(np.float32)
+            else:
+                raise ValueError(f"Depth map not found in the loaded modalities {self.load_modalities}.")
+            
             intrinsics = view_data["intrinsics"].numpy().astype(np.float32)
             c2w_pose = view_data["extrinsics"].numpy().astype(np.float32)
 
@@ -171,7 +177,7 @@ class A3DScenesWAI(BaseDataset):
 
             # Generate valid mask from depthmap
             if "mask" not in view_data:
-                view_data["mask"] = torch.tensor(depthmap > 0.0, device=view_data["depth"].device)
+                view_data["mask"] = torch.tensor(depthmap > 0.0, device=view_data["intrinsics"].device)
 
             non_ambiguous_mask = view_data["mask"].numpy().astype(int)
             non_ambiguous_mask = cv2.resize(

@@ -19,6 +19,7 @@ class Pi3XWrapper(torch.nn.Module):
         name,
         torch_hub_force_reload,
         geometric_input_config,
+        pretrained_model_name_or_path="yyfz233/Pi3X",
         **kwargs,
     ):
         super().__init__()
@@ -29,9 +30,9 @@ class Pi3XWrapper(torch.nn.Module):
         # Load pre-trained weights
         if not torch_hub_force_reload:
             # Initialize the Pi3X model from huggingface hub cache
-            print("Loading Pi3X from huggingface cache ...")
+            print(f"Loading Pi3X from {pretrained_model_name_or_path} ...")
             self.model = Pi3X.from_pretrained(
-                "yyfz233/Pi3X",
+                pretrained_model_name_or_path,
             )
         else:
             # Initialize the Pi3X model

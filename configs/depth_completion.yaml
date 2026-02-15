@@ -8,11 +8,15 @@ root_data_dir: ${machine.root_data_dir}
 root_experiments_dir: ${machine.root_experiments_dir}
 
 model:
-  pretrained: '${root_experiments_dir}/mapanything/training/mapa_finetuning_depth_completion/checkpoint-last.pth'
+  pretrained: '${root_experiments_dir}/mapanything/training/mapa_finetuning_depth_completion_v2/checkpoint-last.pth'
+  task:
+    depth_completion:
+      mvs_mask_prob: 1.0
+
 
 hydra:
   run:
-    dir: '${root_experiments_dir}/mapanything/calibration_benchmarking/single_scene/csu2026'
+    dir: '${root_experiments_dir}/mapanything/depth_completion/a3dscenes/songya100'
 output_dir: ${hydra:run.dir}
 
 batch_size: 8
@@ -28,7 +32,7 @@ align_mode: "affine"
 depth_thresholds: [0.5, 1.0, 2.0, 5.0]
 
 dataset_root: ${root_data_dir}/a3dscenes
-scene_name: "csu2026"
+scene_name: "songya100"
 modalities: ["image", "depth", "mask"]
 
 ### Benchmarking args

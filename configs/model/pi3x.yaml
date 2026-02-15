@@ -10,10 +10,13 @@ model_config:
   # Geometric input config
   geometric_input_config: ${model.task}
   # PI3 model name or path
-  pretrained_model_name_or_path: "yyfz233/Pi3X"
+  pretrained_model_name_or_path: "checkpoints/pi3x"
 # Image Normalization Type
 data_norm_type: "identity"
 # Pi3 checkpoint is already loaded in the inference wrapper
 pretrained: null
 # Torch hub force reload
 torch_hub_force_reload: False
+
+
+# /root/.cache/torch/hub/checkpoints/dinov2_vitg14_pretrain.pth

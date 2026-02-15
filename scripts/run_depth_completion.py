@@ -12,7 +12,7 @@ import torch.backends.cudnn as cudnn
 import matplotlib.pyplot as plt
 import hydra
 from omegaconf import DictConfig, OmegaConf
-
+from tqdm import tqdm
 from mapanything.models import init_model
 from mapanything.utils.wai.core import load_data, load_frame
 
@@ -371,7 +371,7 @@ def benchmark_single_scene(cfg):
         for i in range(0, len(lst), bs):
             yield i, lst[i:i+bs]
 
-    for start_idx, batch_frames in iter_batches(frame_names, batch_size):
+    for start_idx, batch_frames in tqdm(iter_batches(frame_names, batch_size)):
         views = []
         orig_sizes = []
         rgbs_orig = []

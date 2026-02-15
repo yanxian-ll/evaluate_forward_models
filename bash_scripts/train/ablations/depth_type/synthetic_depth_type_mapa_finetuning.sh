@@ -28,9 +28,10 @@ export NCCL_P2P_NET_CHUNKSIZE=524288
 torchrun --nproc_per_node ${NUM_GPUS} \
     scripts/train.py \
     machine=aws \
-    dataset=uavtrain_7d_518_many_ar \
+    dataset=uavtrain_a3dscenes_518_many_ar \
     dataset.num_workers=4 \
     dataset.num_views=16 \
+    dataset.a3dscenes_wai.train.load_modalities=["image","depth_da3"] \
     loss=overall_loss_weigh_pm_higher \
     model=mapanything_v1 \
     model/task=mvs_training \
@@ -43,9 +44,9 @@ torchrun --nproc_per_node ${NUM_GPUS} \
     train_params.min_lr=1e-07 \
     train_params.submodule_configs.encoder.lr=5e-07 \
     train_params.submodule_configs.encoder.min_lr=5e-09 \
-    train_params.epochs=20 \
+    train_params.epochs=10 \
     train_params.warmup_epochs=1 \
     train_params.accum_iter=8 \
     train_params.keep_freq=20 \
     train_params.max_num_of_imgs_per_gpu=16 \
-    hydra.run.dir='${root_experiments_dir}/mapanything/training/mapa_finetuning_v1'
+    hydra.run.dir='${root_experiments_dir}/mapanything/training_ablations/synthetic_depth'
