@@ -1,4 +1,0 @@
-- dataset_root=${root_data_dir}/a3dscenes
-- scene_name=0730_0006
-- resolution=[1022, 630]
-- model.pretrained=${root_experiments_dir}/mapanything/training/mapa_finetuning_depth_completion_v3/checkpoint-last.pth

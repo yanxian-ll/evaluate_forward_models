@@ -8,6 +8,7 @@ hydra/
 private/
 .ruff_cache/
 experiments/
+mapanything.egg-info/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
