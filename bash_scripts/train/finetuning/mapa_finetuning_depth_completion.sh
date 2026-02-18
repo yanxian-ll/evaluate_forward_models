@@ -30,12 +30,13 @@ torchrun --nproc_per_node ${NUM_GPUS} \
     machine=aws \
     dataset=uavtrain_a3dscenes_depth_completion_518_many_ar \
     dataset.num_workers=6 \
-    dataset.num_views=4 \
+    dataset.num_views=1 \
     loss=overall_loss_weigh_pm_higher \
     model=mapanything_v1 \
     model/task=depth_completion \
+    +model/task/mvs_mask_prob=0.5 \
     +model/task/sparse_depth_prob=0.9 \
-    +model/task/sparsification_removal_percent=0.2 \
+    +model/task/sparsification_removal_percent=0.5 \
     model.encoder.gradient_checkpointing=true \
     model.info_sharing.module_args.gradient_checkpointing=true \
     model.pred_head.gradient_checkpointing=true \
@@ -45,9 +46,9 @@ torchrun --nproc_per_node ${NUM_GPUS} \
     train_params.min_lr=1e-07 \
     train_params.submodule_configs.encoder.lr=5e-07 \
     train_params.submodule_configs.encoder.min_lr=5e-09 \
-    train_params.epochs=10 \
+    train_params.epochs=20 \
     train_params.warmup_epochs=1 \
     train_params.accum_iter=2 \
     train_params.keep_freq=20 \
     train_params.max_num_of_imgs_per_gpu=16 \
-    hydra.run.dir='${root_experiments_dir}/mapanything/training/mapa_finetuning_depth_completion_v2'
+    hydra.run.dir='${root_experiments_dir}/mapanything/training/mapa_finetuning_depth_completion_v3'

@@ -877,17 +877,17 @@ class MapAnything(nn.Module, PyTorchModelHubMixin):
         # Get the device and height and width of the images
         device = all_encoder_features_across_views.device
         _, _, height, width = views[0]["img"].shape
-        
-        # Decide sparse depth strategy:
-        # 1) optionally use mvs_mask to sparsify depth if mvs_mask_prob is provided
-        # 2) otherwise fall back to random sparsification controlled by sparse_depth_prob
-        use_mvs_mask = False
-        if "mvs_mask_prob" in self.geometric_input_config:
-            use_mvs_mask = bool(torch.rand(1) < self.geometric_input_config["mvs_mask_prob"])
 
-        use_sparse_depth = False
-        if not use_mvs_mask:
-            use_sparse_depth = bool(torch.rand(1) < self.geometric_input_config["sparse_depth_prob"])
+        # Decide strategies independently:
+        # 1) apply_mvs: use mvs_mask to sparsify depth if mvs_mask_prob is satisfied
+        # 2) apply_sparse: use random sparsification if sparse_depth_prob is satisfied
+        apply_mvs = False
+        if "mvs_mask_prob" in self.geometric_input_config:
+            apply_mvs = bool(torch.rand(1) < self.geometric_input_config["mvs_mask_prob"])
+
+        apply_sparse = False
+        if "sparse_depth_prob" in self.geometric_input_config:
+            apply_sparse = bool(torch.rand(1) < self.geometric_input_config["sparse_depth_prob"])
 
         # Get the depths for all the views
         depth_list = []
@@ -942,10 +942,9 @@ class MapAnything(nn.Module, PyTorchModelHubMixin):
                 metric_scale_mask_for_curr_view[
                     per_sample_depth_input_mask_for_curr_view
                 ] = metric_scale_mask
-                
-                # Sparsely sample the depth if required
-                if use_mvs_mask:
-                    # Use mvs_mask to sparsify depth
+
+                # --- MVS mask sparsification (applied first if requested) ---
+                if apply_mvs:
                     if "mvs_mask" in views[view_idx]:
                         mvs_mask_for_curr_view = views[view_idx]["mvs_mask"][
                             per_sample_depth_input_mask_for_curr_view
@@ -965,12 +964,11 @@ class MapAnything(nn.Module, PyTorchModelHubMixin):
                         # Apply mask: masked-out pixels become 0 => sparse depth
                         depth_for_curr_view_input = depth_for_curr_view_input * mvs_mask_for_curr_view
                     else:
-                        # If mvs_mask was requested but not provided, do nothing (dense) or fall back:
-                        # fall back to random sparsification behavior for robustness
-                        if self.geometric_input_config.get("sparse_depth_prob", 0.0) > 0:
-                            use_sparse_depth = True
+                        # If mvs_mask was requested but not provided, do nothing (skip)
+                        pass
 
-                if use_sparse_depth:
+                # --- Random sparsification (applied second if requested) ---
+                if apply_sparse:
                     # Create a mask of ones
                     sparsification_mask = torch.ones_like(
                         depth_for_curr_view_input, device=device
@@ -1000,6 +998,7 @@ class MapAnything(nn.Module, PyTorchModelHubMixin):
                     depth_for_curr_view_input = (
                         depth_for_curr_view_input * sparsification_mask
                     )
+
                 # Normalize the depth
                 scaled_depth_for_curr_view_input, depth_norm_factor = (
                     normalize_depth_using_non_zero_pixels(
@@ -1027,7 +1026,7 @@ class MapAnything(nn.Module, PyTorchModelHubMixin):
         depths = torch.cat(depth_list, dim=0)  # (B * V, H, W, 1)
         depths = apply_log_to_norm(
             depths
-        )  # Scale logarithimically (norm is computed along last dim)
+        )  # Scale logarithmically (norm is computed along last dim)
         depths = depths.permute(0, 3, 1, 2).contiguous()  # (B * V, 1, H, W)
         # Encode the depths using the depth encoder
         depth_features_across_views = self.depth_encoder(

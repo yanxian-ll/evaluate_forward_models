@@ -9,7 +9,6 @@ import warnings
 from pathlib import Path
 import matplotlib.pyplot as plt
 import torch.backends.cudnn as cudnn
-import matplotlib.pyplot as plt
 import hydra
 from omegaconf import DictConfig, OmegaConf
 from tqdm import tqdm
@@ -293,72 +292,65 @@ def build_view_like_basedataset(
     return view
 
 
-@torch.no_grad()
-def benchmark_single_scene(cfg):
-    # cfg = OmegaConf.to_container(cfg, resolve=True)
+def get_scene_list(dataset_root):
+    """返回 dataset_root 下所有子目录名（场景名），排除非目录和隐藏文件夹"""
+    scenes = []
+    for item in os.listdir(dataset_root):
+        full_path = os.path.join(dataset_root, item)
+        if os.path.isdir(full_path) and not item.startswith('.'):
+            # 可选：检查是否包含 scene_meta.json，若不包含则跳过
+            if os.path.exists(os.path.join(full_path, 'scene_meta.json')):
+                scenes.append(item)
+            else:
+                log.warning(f"Directory {item} does not contain scene_meta.json, skipping.")
+    return sorted(scenes)
 
-    root = cfg["dataset_root"]
-    scene_name = cfg["scene_name"]
-    infer_res = tuple(cfg["resolution"])  # [W,H]
-    batch_size = int(cfg["batch_size"])
-    out_dir = cfg["output_dir"]
 
-    align_mode = cfg.get("align_mode", "scale")  # "scale" | "affine"
-    thresholds = tuple(cfg.get("depth_thresholds", [0.5, 1.0, 2.0, 5.0]))
+def should_skip_scene(scene_dir, scene_name):
+    """检查场景是否已经完成：depth_complete 中的 exr 文件数是否等于 images 中的 png 文件数"""
+    images_dir = os.path.join(scene_dir, 'images')
+    depth_dir = os.path.join(scene_dir, 'depth_complete')
+    if not os.path.exists(images_dir):
+        return False  # 没有 images 目录，肯定不能跳过
+    image_files = [f for f in os.listdir(images_dir) if f.lower().endswith('.png')]
+    if not image_files:
+        return False
+    if not os.path.exists(depth_dir):
+        return False
+    exr_files = [f for f in os.listdir(depth_dir) if f.lower().endswith('.exr')]
+    # 如果数量相等，且都大于0，认为已完成
+    return len(exr_files) == len(image_files) and len(exr_files) > 0
 
-    save_exr_flag = bool(cfg.get("save_exr", True))
-    save_png_flag = bool(cfg.get("save_png", True))
 
+def process_single_scene(cfg, model, device, amp_dtype, scene_name):
+    """处理单个场景，模型已加载好"""
+    dataset_root = cfg["dataset_root"]
+    scene_dir = os.path.join(dataset_root, scene_name)
+    out_dir = scene_dir  # 结果直接保存在场景目录下
+
+    # 跳过检查
+    if should_skip_scene(scene_dir, scene_name):
+        log.info(f"Scene {scene_name} already completed, skipping.")
+        return
+
+    log.info(f"Processing scene: {scene_name}")
     Path(out_dir).mkdir(parents=True, exist_ok=True)
-    (Path(out_dir) / "exr").mkdir(parents=True, exist_ok=True)
-    (Path(out_dir) / "vis").mkdir(parents=True, exist_ok=True)
+    (Path(out_dir) / "depth_complete").mkdir(parents=True, exist_ok=True)
+    (Path(out_dir) / "depth_complete_vis").mkdir(parents=True, exist_ok=True)
 
     transform_name = cfg.get("transform", "imgnorm")
     data_norm_type = cfg.get("data_norm_type", "dinov2")
     img_transform = build_mapanything_transform(transform_name, data_norm_type)
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-    # Fix the seed
-    seed = cfg.seed
-    torch.manual_seed(seed)
-    np.random.seed(seed)
-
-    cudnn.benchmark = not cfg.disable_cudnn_benchmark
-
-    # Determine the mixed precision floating point type
-    if cfg.amp:
-        if cfg.amp_dtype == "fp16":
-            amp_dtype = torch.float16
-        elif cfg.amp_dtype == "bf16":
-            if torch.cuda.is_bf16_supported():
-                amp_dtype = torch.bfloat16
-            else:
-                warnings.warn("bf16 is not supported on this device. Using fp16 instead.")
-                amp_dtype = torch.float16
-        elif cfg.amp_dtype == "fp32":
-            amp_dtype = torch.float32
-        else:
-            amp_dtype = torch.float32
-    else:
-        amp_dtype = torch.float32
-
-    # model
-    model = init_model(
-        cfg.model.model_str, cfg.model.model_config, torch_hub_force_reload=False
-    )
-    model.to(device)
-
-    # Load pretrained model
-    if cfg.model.pretrained:
-        print("Loading pretrained: ", cfg.model.pretrained)
-        ckpt = torch.load(cfg.model.pretrained, map_location=device, weights_only=False)
-        print(model.load_state_dict(ckpt["model"], strict=False))
-        del ckpt
+    infer_res = tuple(cfg["resolution"])  # [W,H]
+    batch_size = int(cfg["batch_size"])
+    align_mode = cfg.get("align_mode", "scale")
+    thresholds = tuple(cfg.get("depth_thresholds", [0.5, 1.0, 2.0, 5.0]))
+    save_exr_flag = bool(cfg.get("save_exr", True))
+    save_png_flag = bool(cfg.get("save_png", True))
 
     # scene meta
-    scene_root = os.path.join(root, scene_name)
-    scene_meta = load_data(os.path.join(scene_root, "scene_meta.json"), "scene_meta")
+    scene_meta = load_data(os.path.join(scene_dir, "scene_meta.json"), "scene_meta")
     frame_names = list(scene_meta["frame_names"].keys())
     frame_names = sorted(frame_names)
 
@@ -366,12 +358,12 @@ def benchmark_single_scene(cfg):
     all_mae, all_rmse = [], []
     all_inliers = {float(t): [] for t in thresholds}
 
-    # mini-batch 
+    # mini-batch iterator
     def iter_batches(lst, bs):
         for i in range(0, len(lst), bs):
             yield i, lst[i:i+bs]
 
-    for start_idx, batch_frames in tqdm(iter_batches(frame_names, batch_size)):
+    for start_idx, batch_frames in tqdm(iter_batches(frame_names, batch_size), desc=f"Scene {scene_name}"):
         views = []
         orig_sizes = []
         rgbs_orig = []
@@ -380,7 +372,7 @@ def benchmark_single_scene(cfg):
 
         for fn in batch_frames:
             vd = load_frame(
-                scene_root,
+                scene_dir,
                 fn,
                 modalities=cfg.get("modalities", ["image", "depth", "mask"]),
                 scene_meta=scene_meta,
@@ -395,6 +387,18 @@ def benchmark_single_scene(cfg):
                 m = vd["mask"].cpu().numpy().astype(bool)
             else:
                 m = depth > 0
+
+            if np.any(m):
+                num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(
+                    m.astype(np.uint8), connectivity=8
+                )
+                if num_labels > 1:
+                    areas = stats[1:, cv2.CC_STAT_AREA]
+                    keep_labels = [i+1 for i, area in enumerate(areas) if area >= cfg.get("min_region_area", 500)]
+                    if keep_labels:
+                        new_mask_binary = np.isin(labels, keep_labels)
+                        depth[~new_mask_binary] = 0.0
+                        m = new_mask_binary
 
             intr = vd["intrinsics"].cpu().numpy().astype(np.float32)
             c2w = vd["extrinsics"].cpu().numpy().astype(np.float32)
@@ -421,9 +425,9 @@ def benchmark_single_scene(cfg):
             else:
                 rgb_in, depth_in, m_in, intr_in = rgb, depth, m, intr
 
-            if not hasattr(benchmark_single_scene, "_rng"):
-                benchmark_single_scene._rng = np.random.default_rng(seed=seed)
-            rng = benchmark_single_scene._rng
+            if not hasattr(process_single_scene, "_rng"):
+                process_single_scene._rng = np.random.default_rng(seed=cfg.seed)
+            rng = process_single_scene._rng
 
             view = build_view_like_basedataset(
                 rgb_uint8=rgb_in,
@@ -438,21 +442,21 @@ def benchmark_single_scene(cfg):
                 rng=rng,
             )
             views.append(view)
+
         def to_torch(x):
             if torch.is_tensor(x):
                 return x
             if isinstance(x, np.ndarray):
-                # bool -> torch.bool; float32 -> torch.float32; int32/int64 -> torch.int32/int64
                 if x.dtype == np.bool_:
                     return torch.from_numpy(x.astype(np.bool_))
                 return torch.from_numpy(x)
-            return x  # str/int/tuple/list 等保持原样
+            return x
 
         tensor_keys = [
             "img","depthmap","valid_mask","pts3d","pts3d_cam","ray_directions_cam",
             "depth_along_ray","non_ambiguous_mask","camera_intrinsics","camera_pose",
             "true_shape","camera_pose_quats","camera_pose_trans",
-            "is_metric_scale","is_synthetic", 
+            "is_metric_scale","is_synthetic",
         ]
 
         for v in views:
@@ -460,7 +464,7 @@ def benchmark_single_scene(cfg):
                 v[kk] = to_torch(v[kk])
                 if torch.is_tensor(v[kk]):
                     v[kk] = v[kk].unsqueeze(0).to(device, non_blocking=True)
-        
+
         merged = {}
         for k in views[0].keys():
             if torch.is_tensor(views[0][k]):
@@ -476,8 +480,8 @@ def benchmark_single_scene(cfg):
             preds = model(model_input)
 
         pred_z = preds[0]["pts3d_cam"][..., 2].detach().float().cpu().numpy()  # (B,H,W)
-        gt_z = merged["pts3d_cam"][..., 2].detach().cpu().numpy().astype(np.float32)  # (B,H,W)
-        vm = merged["valid_mask"].detach().cpu().numpy().astype(bool)  # (B,H,W)
+        gt_z = merged["pts3d_cam"][..., 2].detach().cpu().numpy().astype(np.float32)
+        vm = merged["valid_mask"].detach().cpu().numpy().astype(bool)
 
         for i, fn in enumerate(batch_frames):
             W0, H0 = orig_sizes[i]
@@ -489,7 +493,6 @@ def benchmark_single_scene(cfg):
                 pr_aligned_infer, a, b = align_depth_least_square_np(gt_i_infer, pr_i_infer, m_i_infer)
                 align_info = {"mode": "affine", "a": float(a), "b": float(b)}
             else:
-                # scale-only：median(gt/pr)
                 if m_i_infer.sum() < 10:
                     s = 1.0
                 else:
@@ -515,7 +518,7 @@ def benchmark_single_scene(cfg):
                 pr_aligned_orig = cv2.resize(pr_aligned_infer, (W0, H0), interpolation=cv2.INTER_LINEAR)
                 m0 = mask_orig[i].astype(bool)
                 pr_aligned_orig[~m0] = 0.0
-                exr_path = os.path.join(out_dir, "exr", f"{scene_name}__{Path(str(fn)).stem}.exr")
+                exr_path = os.path.join(out_dir, "depth_complete", f"{Path(str(fn)).stem}.exr")
                 save_exr(exr_path, pr_aligned_orig)
 
             if save_png_flag:
@@ -523,7 +526,7 @@ def benchmark_single_scene(cfg):
                 pr0 = cv2.resize(pr_aligned_infer, (W0, H0), interpolation=cv2.INTER_LINEAR).astype(np.float32)
                 m0 = mask_orig[i].astype(bool) & (gt0 > 0) & np.isfinite(gt0) & np.isfinite(pr0)
                 err0 = np.abs(pr0 - gt0).astype(np.float32)
-                png_path = os.path.join(out_dir, "vis", f"{scene_name}__{Path(str(fn)).stem}.png")
+                png_path = os.path.join(out_dir, "depth_complete_vis", f"{Path(str(fn)).stem}.png")
                 save_triplet_vis(
                     save_path=png_path,
                     rgb=rgbs_orig[i],
@@ -535,6 +538,11 @@ def benchmark_single_scene(cfg):
                     title_prefix=f"{scene_name}/{fn}  ",
                     thr_list=thresholds,
                 )
+
+        # 清理当前 batch 的大变量，帮助回收显存
+        del views, merged, model_input, preds, pred_z, gt_z, vm
+        if device.type == "cuda":
+            torch.cuda.empty_cache()
 
     summary = {
         "scene": scene_name,
@@ -552,18 +560,80 @@ def benchmark_single_scene(cfg):
     with open(os.path.join(out_dir, "summary.json"), "w") as f:
         json.dump(summary, f, indent=2)
 
-    print("Done.")
-    print(json.dumps(summary, indent=2))
+    log.info(f"Scene {scene_name} finished.")
+
+    # 场景结束后清理显存
+    if device.type == "cuda":
+        torch.cuda.empty_cache()
 
 
 @hydra.main(version_base=None, config_path="../configs", config_name="depth_completion")
 def main(cfg: DictConfig):
     cfg = OmegaConf.structured(OmegaConf.to_yaml(cfg))
 
+    # 重定向日志（保持原功能）
     sys.stdout = StreamToLogger(log, logging.INFO)
     sys.stderr = StreamToLogger(log, logging.ERROR)
 
-    benchmark_single_scene(cfg)
+    # 设置随机种子
+    seed = cfg.seed
+    torch.manual_seed(seed)
+    np.random.seed(seed)
+
+    # 获取设备
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    cudnn.benchmark = not cfg.disable_cudnn_benchmark
+
+    # 混合精度类型
+    if cfg.amp:
+        if cfg.amp_dtype == "fp16":
+            amp_dtype = torch.float16
+        elif cfg.amp_dtype == "bf16":
+            if torch.cuda.is_bf16_supported():
+                amp_dtype = torch.bfloat16
+            else:
+                warnings.warn("bf16 is not supported on this device. Using fp16 instead.")
+                amp_dtype = torch.float16
+        elif cfg.amp_dtype == "fp32":
+            amp_dtype = torch.float32
+        else:
+            amp_dtype = torch.float32
+    else:
+        amp_dtype = torch.float32
+
+    # 初始化模型（只加载一次）
+    log.info("Loading model...")
+    model = init_model(
+        cfg.model.model_str, cfg.model.model_config, torch_hub_force_reload=False
+    )
+    model.to(device)
+    if cfg.model.pretrained:
+        log.info(f"Loading pretrained weights from {cfg.model.pretrained}")
+        ckpt = torch.load(cfg.model.pretrained, map_location=device, weights_only=False)
+        model.load_state_dict(ckpt["model"], strict=False)
+        del ckpt
+    model.eval()
+    log.info("Model loaded.")
+
+    # 获取所有场景
+    dataset_root = cfg["dataset_root"]
+    if not os.path.isdir(dataset_root):
+        log.error(f"dataset_root {dataset_root} is not a directory.")
+        return
+
+    scene_list = get_scene_list(dataset_root)
+    if not scene_list:
+        log.warning("No scenes found.")
+        return
+
+    log.info(f"Found {len(scene_list)} scenes: {scene_list}")
+
+    # 依次处理每个场景
+    for scene_name in scene_list:
+        process_single_scene(cfg, model, device, amp_dtype, scene_name)
+
+    log.info("All scenes processed.")
+
 
 if __name__ == "__main__":
     main()
