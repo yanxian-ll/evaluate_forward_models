@@ -167,6 +167,8 @@ class A3DScenesWAI(BaseDataset):
                 depthmap = view_data["depth"].numpy().astype(np.float32)
             elif "depth_da3" in self.load_modalities:
                 depthmap = view_data["depth_da3"].numpy().astype(np.float32)
+            elif "depth_complete" in self.load_modalities:
+                depthmap = view_data["depth_complete"].numpy().astype(np.float32)
             else:
                 raise ValueError(f"Depth map not found in the loaded modalities {self.load_modalities}.")
             

@@ -303,7 +303,7 @@ def get_scene_list(dataset_root):
                 scenes.append(item)
             else:
                 log.warning(f"Directory {item} does not contain scene_meta.json, skipping.")
-    return sorted(scenes)
+    return sorted(scenes, reverse=False)
 
 
 def should_skip_scene(scene_dir, scene_name):
@@ -336,7 +336,6 @@ def process_single_scene(cfg, model, device, amp_dtype, scene_name):
     log.info(f"Processing scene: {scene_name}")
     Path(out_dir).mkdir(parents=True, exist_ok=True)
     (Path(out_dir) / "depth_complete").mkdir(parents=True, exist_ok=True)
-    (Path(out_dir) / "depth_complete_vis").mkdir(parents=True, exist_ok=True)
 
     transform_name = cfg.get("transform", "imgnorm")
     data_norm_type = cfg.get("data_norm_type", "dinov2")
@@ -348,6 +347,9 @@ def process_single_scene(cfg, model, device, amp_dtype, scene_name):
     thresholds = tuple(cfg.get("depth_thresholds", [0.5, 1.0, 2.0, 5.0]))
     save_exr_flag = bool(cfg.get("save_exr", True))
     save_png_flag = bool(cfg.get("save_png", True))
+
+    if save_png_flag:
+        (Path(out_dir) / "depth_complete_vis").mkdir(parents=True, exist_ok=True)
 
     # scene meta
     scene_meta = load_data(os.path.join(scene_dir, "scene_meta.json"), "scene_meta")
@@ -516,8 +518,6 @@ def process_single_scene(cfg, model, device, amp_dtype, scene_name):
 
             if save_exr_flag:
                 pr_aligned_orig = cv2.resize(pr_aligned_infer, (W0, H0), interpolation=cv2.INTER_LINEAR)
-                m0 = mask_orig[i].astype(bool)
-                pr_aligned_orig[~m0] = 0.0
                 exr_path = os.path.join(out_dir, "depth_complete", f"{Path(str(fn)).stem}.exr")
                 save_exr(exr_path, pr_aligned_orig)
 
@@ -581,7 +581,18 @@ def main(cfg: DictConfig):
     np.random.seed(seed)
 
     # 获取设备
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    gpu_id = cfg.get("gpu_id", 0)
+    if torch.cuda.is_available():
+        if gpu_id < torch.cuda.device_count():
+            device = torch.device(f"cuda:{gpu_id}")
+            log.info(f"Using GPU {gpu_id}: {torch.cuda.get_device_name(gpu_id)}")
+        else:
+            log.warning(f"Specified GPU ID {gpu_id} is not available (only {torch.cuda.device_count()} GPUs). Using default GPU 0.")
+            device = torch.device("cuda:0")
+    else:
+        device = torch.device("cpu")
+        log.info("CUDA not available, using CPU.")
+
     cudnn.benchmark = not cfg.disable_cudnn_benchmark
 
     # 混合精度类型

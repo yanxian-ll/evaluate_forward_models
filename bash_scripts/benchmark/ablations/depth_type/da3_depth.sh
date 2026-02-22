@@ -28,14 +28,14 @@ for combo in "${batch_sizes_and_views[@]}"; do
         benchmarking/dense_n_view/benchmark.py \
         machine=aws \
         dataset=$dataset \
-        dataset.num_workers=4 \
+        dataset.num_workers=12 \
         dataset.num_views=$num_views \
         batch_size=$batch_size \
         model=mapanything_v1 \
         model/task=images_only \
         model.encoder.uses_torch_hub=false \
-        model.pretrained='${root_experiments_dir}/mapanything/training_ablations/mvs_depth/checkpoint-last.pth' \
-        hydra.run.dir='${root_experiments_dir}/mapanything/benchmarking_ablations/dense_'"${num_views}"'_view/mvs_depth'
+        model.pretrained='${root_experiments_dir}/mapanything/training_ablations/da3_depth/checkpoint-last.pth' \
+        hydra.run.dir='${root_experiments_dir}/mapanything/benchmarking_ablations/dense_'"${num_views}"'_view/da3_depth'
 
     echo "Finished running $dataset with batch_size=$batch_size and num_views=$num_views"
 done

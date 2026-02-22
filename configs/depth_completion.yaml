@@ -20,6 +20,7 @@ hydra:
     dir: '${root_experiments_dir}/mapanything/depth_completion/a3dscenes/heize_70M_v3'   # 此路径在批量处理时会被覆盖，可留作默认
 output_dir: ${hydra:run.dir}
 
+gpu_id: 0
 batch_size: 8
 save_exr: true
 save_png: false

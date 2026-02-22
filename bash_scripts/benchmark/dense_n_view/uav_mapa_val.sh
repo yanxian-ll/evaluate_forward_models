@@ -9,12 +9,12 @@ export HYDRA_FULL_ERROR=1
 
 # Define the batch sizes and number of views to loop over
 batch_sizes_and_views=(
-    # "20 2 benchmark_518_a3dscenes_whuomvs"
-    # "20 4 benchmark_518_a3dscenes_whuomvs"
-    # "10 8 benchmark_518_a3dscenes_whuomvs"
-    "4 16 benchmark_518_a3dscenes_whuomvs"
-    # "3 24 benchmark_518_a3dscenes_whuomvs"
-    # "2 32 benchmark_518_a3dscenes_whuomvs"
+    # "20 2 benchmark_518_a3dscenes_whuomvs_val"
+    # "20 4 benchmark_518_a3dscenes_whuomvs_val"
+    # "10 8 benchmark_518_a3dscenes_whuomvs_val"
+    "4 16 benchmark_518_a3dscenes_whuomvs_val"
+    # "3 24 benchmark_518_a3dscenes_whuomvs_val"
+    # "2 32 benchmark_518_a3dscenes_whuomvs_val"
 )
 
 # Loop through each combination
@@ -28,14 +28,14 @@ for combo in "${batch_sizes_and_views[@]}"; do
         benchmarking/dense_n_view/benchmark.py \
         machine=aws \
         dataset=$dataset \
-        dataset.num_workers=4 \
+        dataset.num_workers=12 \
         dataset.num_views=$num_views \
         batch_size=$batch_size \
         model=mapanything_v1 \
         model/task=images_only \
         model.encoder.uses_torch_hub=false \
-        model.pretrained='${root_experiments_dir}/mapanything/training_ablations/mvs_depth/checkpoint-last.pth' \
-        hydra.run.dir='${root_experiments_dir}/mapanything/benchmarking_ablations/dense_'"${num_views}"'_view/mvs_depth'
+        model.pretrained='${root_experiments_dir}/mapanything/training/mapa_finetuning_v1/checkpoint-last.pth' \
+        hydra.run.dir='${root_experiments_dir}/mapanything/benchmarking/dense_'"${num_views}"'_view/uav_mapa_val'
 
     echo "Finished running $dataset with batch_size=$batch_size and num_views=$num_views"
 done

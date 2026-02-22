@@ -20,6 +20,21 @@ import torch
 import torch.backends.cudnn as cudnn
 from omegaconf import DictConfig, OmegaConf
 
+# Set the cache directory for torch hub
+torch.hub.set_dir("/opt/data/private/code/map-anything/checkpoints/torch_cache/hub")
+
+# load local dino repo
+LOCAL_DINO_REPO = "/opt/data/private/code/map-anything/checkpoints/torch_cache/hub/facebookresearch_dinov2_main"
+_original_torch_hub_load = torch.hub.load
+def offline_torch_hub_load(repo_or_dir, model, *args, **kwargs):
+    if repo_or_dir == "facebookresearch/dinov2":
+        print("Redirecting DINOv2 torch.hub.load to local repo")
+        repo_or_dir = LOCAL_DINO_REPO
+        kwargs["source"] = "local"
+    return _original_torch_hub_load(repo_or_dir, model, *args, **kwargs)
+torch.hub.load = offline_torch_hub_load
+
+
 from mapanything.datasets import get_test_data_loader
 from mapanything.models import init_model
 from mapanything.utils.geometry import (
@@ -391,6 +406,7 @@ def benchmark(args):
                     sim3_iters=1,
                     max_samples_per_view_abs=500,
                     return_fused_debug=True,
+                    compute_abs_metrics=args.get("compute_abs_metrics", False),
                 )
 
                 # save ply if needed

@@ -22,10 +22,29 @@ from omegaconf import DictConfig, OmegaConf
 from mapanything.train.training import train
 from mapanything.utils.misc import StreamToLogger
 
+# Disable torch hub download
+import os
+os.environ["TORCH_HUB_DISABLE_DOWNLOAD"] = "1"
+
+# Set the cache directory for torch hub
+import torch
+torch.hub.set_dir("/opt/data/private/code/map-anything/checkpoints/torch_cache/hub")
+
+# load local dino repo
+LOCAL_DINO_REPO = "/opt/data/private/code/map-anything/checkpoints/torch_cache/hub/facebookresearch_dinov2_main"
+_original_torch_hub_load = torch.hub.load
+def offline_torch_hub_load(repo_or_dir, model, *args, **kwargs):
+    if repo_or_dir == "facebookresearch/dinov2":
+        print("Redirecting DINOv2 torch.hub.load to local repo")
+        repo_or_dir = LOCAL_DINO_REPO
+        kwargs["source"] = "local"
+    return _original_torch_hub_load(repo_or_dir, model, *args, **kwargs)
+torch.hub.load = offline_torch_hub_load
+
 log = logging.getLogger(__name__)
 
 
-@hydra.main(version_base=None, config_path="../configs", config_name="train")
+@hydra.main(version_base=None, config_path="../configs", config_name="debug_train")
 def execute_training(cfg: DictConfig):
     """
     Execute the training process with the provided configuration.

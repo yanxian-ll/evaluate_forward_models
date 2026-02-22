@@ -49,4 +49,4 @@ torchrun --nproc_per_node ${NUM_GPUS} \
     train_params.accum_iter=8 \
     train_params.keep_freq=20 \
     train_params.max_num_of_imgs_per_gpu=16 \
-    hydra.run.dir='${root_experiments_dir}/mapanything/training_ablations/synthetic_depth'
+    hydra.run.dir='${root_experiments_dir}/mapanything/training_ablations/da3_depth'
