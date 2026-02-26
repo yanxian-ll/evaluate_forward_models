@@ -21,6 +21,21 @@ from pathlib import Path
 
 import torch
 
+
+# Set the cache directory for torch hub
+torch.hub.set_dir("/opt/data/private/code/map-anything/checkpoints/torch_cache/hub")
+
+# load local dino repo
+LOCAL_DINO_REPO = "/opt/data/private/code/map-anything/checkpoints/torch_cache/hub/facebookresearch_dinov2_main"
+_original_torch_hub_load = torch.hub.load
+def offline_torch_hub_load(repo_or_dir, model, *args, **kwargs):
+    if repo_or_dir == "facebookresearch/dinov2":
+        print("Redirecting DINOv2 torch.hub.load to local repo")
+        repo_or_dir = LOCAL_DINO_REPO
+        kwargs["source"] = "local"
+    return _original_torch_hub_load(repo_or_dir, model, *args, **kwargs)
+torch.hub.load = offline_torch_hub_load
+
 from mapanything.models import MapAnything
 
 

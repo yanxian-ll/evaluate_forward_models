@@ -123,12 +123,9 @@ def build_methods_cfg() -> "OrderedDict[str, MethodCfg]":
     return OrderedDict(
         [
             ("MapAnything", MethodCfg(subdir="mapa_24v", color="C0", marker="o", linestyle="-")),
-            ("VGGT",        MethodCfg(subdir="vggt",    color="C1", marker="s", linestyle="-")),
-            ("Pi3",         MethodCfg(subdir="pi3",     color="C2", marker="^", linestyle="--")),
-            ("Pi3X",        MethodCfg(subdir="pi3x",    color="C3", marker="D", linestyle="--")),
-            ("DA3",         MethodCfg(subdir="da3",     color="C4", marker="v", linestyle="-.")),
-            ("HunYuan",     MethodCfg(subdir="hunyuan", color="C5", marker="P", linestyle=":")),
-            ("UAVMapa",     MethodCfg(subdir="uav_mapa",color="C6", marker="o", linestyle="-")),
+            ("Mapa-csfm",   MethodCfg(subdir="mapa_24v_csfm",color="C1", marker="s", linestyle="-")),
+            ("Mapa-psfm",   MethodCfg(subdir="mapa_24v_psfm",color="C2", marker="^", linestyle="--")),
+            ("Mapa-mvs",    MethodCfg(subdir="mapa_24v_mvs", color="C3", marker="D", linestyle="--")),
         ]
     )
 
@@ -362,7 +359,7 @@ def main() -> None:
     parser.add_argument(
         "--output",
         type=str,
-        default="experiments/mapanything/benchmarking/figs_per_dataset",
+        default="experiments/mapanything/benchmarking/figs_per_dataset_task",
         help="Output directory to save figures.",
     )
     parser.add_argument(

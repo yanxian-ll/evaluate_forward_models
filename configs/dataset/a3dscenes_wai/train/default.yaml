@@ -26,7 +26,7 @@ dataset_metadata_dir: ${mapanything_dataset_metadata_dir}
 overfit_num_sets: null
 variable_num_views: ${dataset.train.variable_num_views}
 num_views: ${dataset.num_views}
-covisibility_thres: 0.1
+covisibility_thres: 0.25
 covisibility_thres_max: 1.0
 sampling_mode: "random_walk"
 load_modalities: ["image", "depth", "mask"]

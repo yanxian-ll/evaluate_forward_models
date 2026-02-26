@@ -19,9 +19,9 @@ resolution_val_a3dscenes: ${dataset.resolution_options.518_1_33_ar}
 # Training Set
 train_dataset:
   "+ 10_000 @ ${dataset.blendedmvs_wai.train.dataset_str}
-  + 10_000 @ ${dataset.a3dscenes_wai.train.dataset_str}
+  + 30_000 @ ${dataset.a3dscenes_wai.train.dataset_str}
   + 10_000 @ ${dataset.uavscenes_wai.train.dataset_str}
-  + 30_000 @ ${dataset.whu_luojia_whuomvs_wai.train.dataset_str}"
+  + 10_000 @ ${dataset.whu_luojia_whuomvs_wai.train.dataset_str}"
   # WildUAV (maybe)
 
 # Validation Set
