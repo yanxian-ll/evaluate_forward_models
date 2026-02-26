@@ -24,6 +24,7 @@ from mapanything.models.mapanything import (
     MapAnythingAblations,
     ModularDUSt3R,
 )
+from mapanything.models.mapanything.model_semantic import MapAnythingSemantic
 
 # Suppress DINOv2 warnings
 logging.getLogger("dinov2").setLevel(logging.WARNING)
@@ -145,6 +146,9 @@ MODEL_CONFIGS = {
     # Core models
     "mapanything": {
         "class": MapAnything,
+    },
+    "mapanything_semantic": {
+        "class": MapAnythingSemantic,
     },
     "mapanything_ablations": {
         "class": MapAnythingAblations,

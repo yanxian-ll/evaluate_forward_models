@@ -15,6 +15,7 @@ from copy import copy, deepcopy
 import einops as ein
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 from mapanything.utils.geometry import (
     angle_diff_vec3,
@@ -5646,3 +5647,347 @@ class DisentangledFactoredGeometryScaleRegr3DPlusNormalGMLoss(
         losses = Sum(*loss_terms)
 
         return losses, (details | {})
+
+class CrossEntropyLoss(BaseCriterion):
+    """Cross Entropy loss for semantic segmentation (supports label smoothing / class weights)"""
+
+    def __init__(
+        self,
+        reduction="mean",
+        ignore_index=0,
+        label_smoothing=0.0,
+        class_weight=None,
+    ):
+        super().__init__(reduction=reduction)
+        self.ignore_index = int(ignore_index)
+        self.label_smoothing = float(label_smoothing)
+
+        # class_weight can be list/tuple/tensor or None
+        if class_weight is None:
+            self.register_buffer("_class_weight", torch.tensor([], dtype=torch.float32), persistent=False)
+        else:
+            cw = torch.as_tensor(class_weight, dtype=torch.float32)
+            self.register_buffer("_class_weight", cw, persistent=False)
+
+    @property
+    def class_weight(self):
+        return None if self._class_weight.numel() == 0 else self._class_weight
+
+    def forward(self, predicted_logits, reference_labels):
+        """
+        Args:
+            predicted_logits: (B, C, H, W)
+            reference_labels: (B, H, W), dtype long
+
+        Returns:
+            scalar tensor
+        """
+        return F.cross_entropy(
+            predicted_logits,
+            reference_labels,
+            weight=self.class_weight,
+            reduction=self.reduction,
+            ignore_index=self.ignore_index,
+            label_smoothing=self.label_smoothing,
+        )
+
+
+class SemanticSegmentationLoss(Criterion, MultiLoss):
+    """
+    Semantic segmentation loss aligned with MapAnythingSemantic outputs.
+
+    Expected prediction keys (preferred -> fallback):
+      - pred["semantic_logits"]  (B, C, H, W)
+      - pred["semantic"]         (backward compatibility)
+
+    Expected GT key:
+      - gt["instance"] (H, W) or (B, H, W), numpy or torch.Tensor
+
+    Optional GT masks for masking supervision:
+      - gt["valid_mask"]          (H, W) / (B, H, W)
+      - gt["non_ambiguous_mask"]  (H, W) / (B, H, W)
+    """
+
+    def __init__(
+        self,
+        ignore_index=0,
+        label_key="instance",
+        logit_key="semantic_logits",
+        # masking controls
+        apply_valid_mask=True,
+        apply_non_ambiguous_mask=True,
+        apply_pred_semantic_valid_mask=False,
+        # CE / Dice composition
+        ce_weight=1.0,
+        dice_weight=0.0,
+        include_background_in_dice=False,
+        # CE options
+        label_smoothing=0.0,
+        class_weight=None,
+        # tiny eps
+        eps=1e-6,
+        **kwargs,
+    ):
+        ce_criterion = CrossEntropyLoss(
+            reduction="mean",
+            ignore_index=ignore_index,
+            label_smoothing=label_smoothing,
+            class_weight=class_weight,
+        )
+        super().__init__(ce_criterion)
+
+        self.ignore_index = int(ignore_index)
+        self.label_key = label_key
+        self.logit_key = logit_key
+
+        self.apply_valid_mask = bool(apply_valid_mask)
+        self.apply_non_ambiguous_mask = bool(apply_non_ambiguous_mask)
+        self.apply_pred_semantic_valid_mask = bool(apply_pred_semantic_valid_mask)
+
+        self.ce_weight = float(ce_weight)
+        self.dice_weight = float(dice_weight)
+        self.include_background_in_dice = bool(include_background_in_dice)
+
+        self.eps = float(eps)
+
+    # -------------------------
+    # helpers
+    # -------------------------
+    @staticmethod
+    def _to_tensor(x, device=None, dtype=None):
+        if x is None:
+            return None
+        if isinstance(x, torch.Tensor):
+            t = x
+        else:
+            t = torch.as_tensor(x)
+        if device is not None:
+            t = t.to(device=device)
+        if dtype is not None:
+            t = t.to(dtype=dtype)
+        return t
+
+    @staticmethod
+    def _ensure_bhw(label_t: torch.Tensor) -> torch.Tensor:
+        """
+        Convert label to (B,H,W).
+        Accepts:
+          - (H,W)
+          - (1,H,W)
+          - (B,H,W)
+          - (B,1,H,W)
+        """
+        if label_t.ndim == 2:
+            label_t = label_t.unsqueeze(0)
+        elif label_t.ndim == 4 and label_t.shape[1] == 1:
+            label_t = label_t[:, 0]
+        elif label_t.ndim == 4 and label_t.shape[-1] == 1:
+            label_t = label_t[..., 0]
+        elif label_t.ndim != 3:
+            raise ValueError(f"Unsupported label shape for semantic gt: {tuple(label_t.shape)}")
+        return label_t
+
+    @staticmethod
+    def _ensure_mask_bhw(mask_t: torch.Tensor) -> torch.Tensor:
+        """
+        Convert mask to (B,H,W) bool.
+        """
+        if mask_t.ndim == 2:
+            mask_t = mask_t.unsqueeze(0)
+        elif mask_t.ndim == 4 and mask_t.shape[1] == 1:
+            mask_t = mask_t[:, 0]
+        elif mask_t.ndim == 4 and mask_t.shape[-1] == 1:
+            mask_t = mask_t[..., 0]
+        elif mask_t.ndim != 3:
+            raise ValueError(f"Unsupported mask shape: {tuple(mask_t.shape)}")
+        return mask_t.bool()
+
+    def _resize_label_to_logits(self, labels_bhw: torch.Tensor, logits: torch.Tensor) -> torch.Tensor:
+        _, _, h, w = logits.shape
+        if labels_bhw.shape[-2:] == (h, w):
+            return labels_bhw
+        # nearest for labels
+        labels_bhw = F.interpolate(
+            labels_bhw.unsqueeze(1).float(),
+            size=(h, w),
+            mode="nearest",
+        ).squeeze(1).long()
+        return labels_bhw
+
+    def _resize_mask_to_logits(self, mask_bhw: torch.Tensor, logits: torch.Tensor) -> torch.Tensor:
+        _, _, h, w = logits.shape
+        if mask_bhw.shape[-2:] == (h, w):
+            return mask_bhw.bool()
+        mask_bhw = F.interpolate(
+            mask_bhw.unsqueeze(1).float(),
+            size=(h, w),
+            mode="nearest",
+        ).squeeze(1).bool()
+        return mask_bhw
+
+    def _compute_soft_dice_loss(self, logits: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        """
+        logits: (B,C,H,W)
+        target: (B,H,W), with ignore_index allowed
+        """
+        num_classes = logits.shape[1]
+        probs = F.softmax(logits, dim=1)  # (B,C,H,W)
+
+        valid = target != self.ignore_index  # (B,H,W)
+        if valid.sum() == 0:
+            return logits.new_zeros(())
+
+        # prepare safe target for one_hot (replace ignore_index with 0 temporarily)
+        target_safe = target.clone()
+        target_safe[~valid] = 0
+        one_hot = F.one_hot(target_safe.long(), num_classes=num_classes)  # (B,H,W,C)
+        one_hot = one_hot.permute(0, 3, 1, 2).float()  # (B,C,H,W)
+
+        valid_f = valid.unsqueeze(1).float()  # (B,1,H,W)
+        probs = probs * valid_f
+        one_hot = one_hot * valid_f
+
+        if not self.include_background_in_dice and num_classes > 1:
+            probs = probs[:, 1:]
+            one_hot = one_hot[:, 1:]
+
+        # If all classes removed (e.g. num_classes=1 and exclude bg), return zero
+        if probs.shape[1] == 0:
+            return logits.new_zeros(())
+
+        intersection = (probs * one_hot).sum(dim=(0, 2, 3))
+        denom = (probs + one_hot).sum(dim=(0, 2, 3))
+
+        # only average classes present in GT to avoid unstable empty-class dice
+        gt_present = one_hot.sum(dim=(0, 2, 3)) > 0
+        if gt_present.sum() == 0:
+            return logits.new_zeros(())
+
+        dice_per_class = (2.0 * intersection + self.eps) / (denom + self.eps)
+        dice_loss = 1.0 - dice_per_class[gt_present].mean()
+        return dice_loss
+
+    def _get_pred_logits(self, pred: dict):
+        # aligned with MapAnythingSemantic.forward/infer
+        if self.logit_key in pred:
+            return pred[self.logit_key]
+        if "semantic_logits" in pred:
+            return pred["semantic_logits"]
+        if "semantic" in pred:  # backward compatibility
+            return pred["semantic"]
+        return None
+
+    def compute_loss(self, batch, preds, **kw):
+        """
+        Args:
+            batch: list[dict] GT views
+            preds: list[dict] predicted views (from MapAnythingSemantic.forward)
+
+        Returns:
+            loss, details
+        """
+        loss_list = []
+        details = {}
+        self_name = type(self).__name__
+
+        ce_running = []
+        dice_running = []
+        total_running = []
+
+        # find fallback device for zero tensor if all skipped
+        fallback_device = None
+        for p in preds:
+            if isinstance(p, dict):
+                for v in p.values():
+                    if isinstance(v, torch.Tensor):
+                        fallback_device = v.device
+                        break
+            if fallback_device is not None:
+                break
+        if fallback_device is None:
+            fallback_device = torch.device("cpu")
+
+        for view_idx, (gt, pred) in enumerate(zip(batch, preds)):
+            logits = self._get_pred_logits(pred)
+            if logits is None:
+                continue
+            if logits.ndim != 4:
+                raise ValueError(
+                    f"Expected semantic logits shape (B,C,H,W), got {tuple(logits.shape)}"
+                )
+
+            gt_labels = gt.get(self.label_key, None)
+            if gt_labels is None:
+                continue
+
+            # GT labels -> (B,H,W), long, same device
+            target = self._to_tensor(gt_labels, device=logits.device)
+            target = self._ensure_bhw(target).long()
+            target = self._resize_label_to_logits(target, logits)
+
+            # Build ignore mask from GT/pred masks
+            ignore_mask = torch.zeros_like(target, dtype=torch.bool, device=target.device)
+
+            if self.apply_valid_mask and ("valid_mask" in gt):
+                valid_mask = self._to_tensor(gt["valid_mask"], device=logits.device)
+                valid_mask = self._ensure_mask_bhw(valid_mask)
+                valid_mask = self._resize_mask_to_logits(valid_mask, logits)
+                ignore_mask |= (~valid_mask)
+
+            if self.apply_non_ambiguous_mask and ("non_ambiguous_mask" in gt):
+                non_amb = self._to_tensor(gt["non_ambiguous_mask"], device=logits.device)
+                non_amb = self._ensure_mask_bhw(non_amb)
+                non_amb = self._resize_mask_to_logits(non_amb, logits)
+                ignore_mask |= (~non_amb)
+
+            if self.apply_pred_semantic_valid_mask and ("semantic_valid_mask" in pred):
+                sem_valid = self._to_tensor(pred["semantic_valid_mask"], device=logits.device)
+                sem_valid = self._ensure_mask_bhw(sem_valid)
+                sem_valid = self._resize_mask_to_logits(sem_valid, logits)
+                ignore_mask |= (~sem_valid)
+
+            target = target.clone()
+            target[ignore_mask] = self.ignore_index
+
+            # If a view has no valid pixels after masking, skip it
+            valid_count = int((target != self.ignore_index).sum().item())
+            if valid_count == 0:
+                continue
+
+            ce_loss = self.criterion(logits, target)  # scalar
+            total_loss = self.ce_weight * ce_loss
+
+            view_details = {
+                f"{self_name}_ce_view{view_idx + 1}": float(ce_loss),
+            }
+
+            if self.dice_weight > 0:
+                dice_loss = self._compute_soft_dice_loss(logits, target)
+                total_loss = total_loss + self.dice_weight * dice_loss
+                view_details[f"{self_name}_dice_view{view_idx + 1}"] = float(dice_loss)
+                dice_running.append(float(dice_loss))
+
+            view_details[f"{self_name}_view{view_idx + 1}"] = float(total_loss)
+            view_details[f"{self_name}_valid_pixels_view{view_idx + 1}"] = valid_count
+
+            details.update(view_details)
+            ce_running.append(float(ce_loss))
+            total_running.append(float(total_loss))
+
+            loss_list.append((total_loss, None, "semantic"))
+
+        if len(loss_list) == 0:
+            zero = torch.tensor(0.0, device=fallback_device)
+            details[f"{self_name}_avg"] = 0.0
+            details[f"{self_name}_ce_avg"] = 0.0
+            if self.dice_weight > 0:
+                details[f"{self_name}_dice_avg"] = 0.0
+            loss_list.append((zero, None, "semantic"))
+        else:
+            details[f"{self_name}_avg"] = sum(total_running) / len(total_running)
+            details[f"{self_name}_ce_avg"] = sum(ce_running) / len(ce_running)
+            if self.dice_weight > 0 and len(dice_running) > 0:
+                details[f"{self_name}_dice_avg"] = sum(dice_running) / len(dice_running)
+
+        return Sum(*loss_list), (details | {})
+    

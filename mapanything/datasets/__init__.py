@@ -32,6 +32,7 @@ from mapanything.datasets.wai.whu_luojia_whuomvs import WHULuoJiaWHUOMVSWAI # no
 from mapanything.datasets.wai.uavscenes import UAVScenesWAI # noqa
 # from mapanything.datasets.wai.ortholoc import OrthoLocWAI # noqa
 
+from mapanything.datasets.wai.a3dscenes_instance import A3DScenesWAIInstance # noqa
 
 def get_test_data_loader(
     dataset, batch_size, num_workers=8, shuffle=False, drop_last=False, pin_mem=True

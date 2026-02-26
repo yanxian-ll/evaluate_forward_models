@@ -1032,6 +1032,127 @@ def _store_labeled_image(
     pil_image.save(fname, pnginfo=meta)
 
 
+def _load_semantic_mask(
+    fname: str | Path,
+    fmt: str = "torch",
+    resize: tuple[int, int] | None = None,
+    **kwargs,
+) -> np.ndarray | torch.Tensor | Image.Image:
+    """
+    Loads a semantic mask from a PNG file.
+
+    Args:
+        fname (str or Path): The filename to load the semantic mask from.
+        fmt (str): The format of the output data. Can be one of:
+            - "torch": Returns a PyTorch uint8 tensor with shape (H, W).
+            - "np": Returns a NumPy uint8 array with shape (H, W).
+            - "pil": Returns a PIL Image object.
+            Defaults to "torch".
+        resize (tuple, optional): A tuple of two integers representing the desired width and height of the image.
+            If None, the image is not resized. Defaults to None.
+
+    Returns:
+        The loaded semantic mask in the specified output format.
+
+    Raises:
+        NotImplementedError: If the specified output format is not supported.
+
+    Notes:
+        This function loads a grayscale image where each pixel value represents a semantic class ID (0-255).
+    """
+    with open(fname, "rb") as f:
+        pil_image = Image.open(f)
+        pil_image.load()
+
+        if pil_image.mode not in ["L", "RGB", "RGBA"]:
+            raise OSError(
+                f"Expected a grayscale or RGB image in {fname}, but instead found an image with mode {pil_image.mode}"
+            )
+
+        # Convert to grayscale (L mode) if needed
+        if pil_image.mode != "L":
+            pil_image = pil_image.convert("L")
+
+        if resize is not None:
+            pil_image = pil_image.resize(resize, Image.NEAREST)
+
+    if fmt == "pil":
+        return pil_image
+
+    # Load as uint8 array with shape (H, W)
+    img_data = np.array(pil_image, dtype=np.uint8)
+
+    if fmt == "np":
+        return img_data
+    elif fmt == "torch":
+        return torch.from_numpy(img_data)
+    else:
+        raise NotImplementedError(f"Image format not supported: {fmt}")
+
+
+def _store_semantic_mask(
+    fname: str | Path,
+    img_data: np.ndarray | torch.Tensor | Image.Image,
+    **kwargs,
+) -> None:
+    """
+    Stores a semantic mask as a uint8 grayscale PNG file.
+
+    Args:
+        fname (str or Path): The filename to store the semantic mask in.
+        img_data (numpy.ndarray, torch.Tensor or PIL.Image.Image): The per-pixel label ids to store (0-255).
+
+    Raises:
+        ValueError: If the file suffix is not supported (i.e., not .png).
+        RuntimeError: If the type of the image data is not uint8.
+
+    Notes:
+        This function saves a grayscale image where each pixel value represents a semantic class ID (0-255).
+    """
+    if Path(fname).suffix != ".png":
+        raise ValueError(
+            f"Only filenames with suffix .png allowed but received: {fname}"
+        )
+
+    if isinstance(img_data, Image.Image):
+        if img_data.mode not in ["L", "I;16"]:
+            raise RuntimeError(
+                f"The provided PIL image has mode {img_data.mode}, expected L or I;16."
+            )
+        # Convert to numpy
+        img_data = np.array(img_data)
+        # Handle I;16 mode (16-bit)
+        if img_data.dtype == np.uint16:
+            img_data = img_data.astype(np.uint8)
+
+    if isinstance(img_data, np.ndarray):
+        if img_data.dtype not in [np.uint8, np.uint16, np.int16, np.int32]:
+            raise RuntimeError(
+                f"The provided NumPy array has type {img_data.dtype} but the expected type is np.uint8, np.uint16, np.int16 or np.int32."
+            )
+        # Convert to uint8 if needed
+        if img_data.dtype != np.uint8:
+            img_data = img_data.astype(np.uint8)
+
+    if isinstance(img_data, torch.Tensor):
+        if img_data.dtype not in [torch.uint8, torch.uint16, torch.int16, torch.int32]:
+            raise RuntimeError(
+                f"The provided PyTorch tensor has type {img_data.dtype} but the expected type is torch.uint8, torch.uint16, torch.int16 or torch.int32."
+            )
+        img_data = img_data.numpy()
+        if img_data.dtype != np.uint8:
+            img_data = img_data.astype(np.uint8)
+
+    # Ensure 2D array (H, W)
+    if img_data.ndim > 2:
+        img_data = img_data.squeeze()
+    if img_data.ndim != 2:
+        raise ValueError(f"Expected 2D array but got shape {img_data.shape}")
+
+    pil_image = Image.fromarray(img_data, "L")
+    pil_image.save(fname)
+
+
 def _load_generic_mesh(mesh_path: str | Path, **kwargs) -> trimesh.Trimesh:
     """Load mesh with the trimesh library.
 
@@ -1372,6 +1493,7 @@ def _get_method(
         "labeled_image": (_load_labeled_image, _store_labeled_image),
         "mesh": (_load_generic_mesh, _store_generic_mesh),
         "labeled_mesh": (_load_labeled_mesh, _store_labeled_mesh),
+        "semantic_mask": (_load_semantic_mask, _store_semantic_mask),
     }
     try:
         return methods[format_type][0 if load else 1]
