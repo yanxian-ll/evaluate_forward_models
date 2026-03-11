@@ -19,6 +19,9 @@ defaults:
   - a3dscenes_depth_completion_wai: default
   - a3dscenes_instance_wai: default
   - uavscenes_wai: default
+  - a3dreal_wai: default
+  - a3dsynl_wai: default
+  - a3dsyns_wai: default
 
 # Training Set, For example: BlendedMVS(split='train', resolution=(512, 384), transform=...)
 train_dataset: ???

@@ -1,10 +1,8 @@
 """
-A3DScenes Dataset using WAI format data.
+A3D-Real Dataset using WAI format data.
 """
 
 import os
-import json
-
 import torch
 import cv2
 import numpy as np
@@ -14,9 +12,9 @@ from mapanything.utils.wai.core import load_data, load_frame
 from mapanything.datasets.utils.csr_utils import _csr_sampling, _load_covis_graph 
 
 
-class A3DScenesWAI(BaseDataset):
+class A3DRealWAI(BaseDataset):
     """
-    A3DScenes dataset containing object-centric and birds-eye-view scenes.
+    A3D-Real dataset containing object-centric and birds-eye-view scenes.
     """
 
     def __init__(
@@ -61,7 +59,7 @@ class A3DScenesWAI(BaseDataset):
         split_metadata_path = os.path.join(
             self.dataset_metadata_dir,
             self.split,
-            f"a3dscenes_scene_list_{self.split}.npy",
+            f"A3D-Real_scene_list_{self.split}.npy",
         )
         split_scene_list = np.load(split_metadata_path, allow_pickle=True)
 
@@ -209,7 +207,7 @@ class A3DScenesWAI(BaseDataset):
                     camera_pose=c2w_pose,  # cam2world
                     camera_intrinsics=intrinsics,
                     non_ambiguous_mask=non_ambiguous_mask,
-                    dataset="A3DScenes",
+                    dataset="A3D-Real",
                     label=scene_name,
                     instance=os.path.join("images", str(view_file_name)),
                 )
@@ -223,12 +221,12 @@ def get_parser():
 
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "-rd", "--root_dir", default="../../dataset/data/a3dscenes", type=str
+        "-rd", "--root_dir", default="/home/csuzhang/disk/a3dscenes/A3D-Real", type=str
     )
     parser.add_argument(
         "-dmd",
         "--dataset_metadata_dir",
-        default="../../dataset/metadata",
+        default="/home/csuzhang/disk/a3dscenes/metadata",
         type=str,
     )
     parser.add_argument(
@@ -241,6 +239,8 @@ def get_parser():
 
     return parser
 
+
+# python a3dreal.py --viz --serve
 
 if __name__ == "__main__":
     import rerun as rr
@@ -256,7 +256,7 @@ if __name__ == "__main__":
     )  # Options: --headless, --connect, --serve, --addr, --save, --stdout
     args = parser.parse_args()
 
-    dataset = A3DScenesWAI(
+    dataset = A3DRealWAI(
         num_views=args.num_of_views,
         split="train",
         covisibility_thres=0.1,
@@ -267,16 +267,16 @@ if __name__ == "__main__":
         aug_crop=16,
         transform="colorjitter+grayscale+gaublur",
         data_norm_type="dinov2",
-        sampling_mode="greedy_chain",  # "random_walk" or "greedy_chain"
+        sampling_mode="random_walk",  # "random_walk" or "greedy_chain"
     )
     print(dataset.get_stats())
 
     if args.viz:
-        rr.script_setup(args, "A3DScenes_Dataloader")
+        rr.script_setup(args, "A3D-Real_Dataloader")
         rr.set_time("stable_time", sequence=0)
         rr.log("world", rr.ViewCoordinates.RDF, static=True)
 
-    sampled_indices = np.random.choice(len(dataset), size=10, replace=False)
+    sampled_indices = np.random.choice(len(dataset), size=70, replace=False)
 
     for num, idx in enumerate(tqdm(sampled_indices)):
         views = dataset[idx]

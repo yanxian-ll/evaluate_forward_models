@@ -26,13 +26,14 @@ from mapanything.datasets.wai.tav2_wb import TartanAirV2WBWAI  # noqa
 from mapanything.datasets.wai.unrealstereo4k import UnrealStereo4KWAI  # noqa
 from mapanything.utils.train_tools import get_rank, get_world_size
 
-from mapanything.datasets.wai.a3dscenes import A3DScenesWAI # noqa
-from mapanything.datasets.wai.a3dscenes_depth_completion import A3DScenesDepthCompletionWAI # noqa
 from mapanything.datasets.wai.whu_luojia_whuomvs import WHULuoJiaWHUOMVSWAI # noqa
 from mapanything.datasets.wai.uavscenes import UAVScenesWAI # noqa
 # from mapanything.datasets.wai.ortholoc import OrthoLocWAI # noqa
-
+from mapanything.datasets.wai.a3dreal import A3DRealWAI       # noqa
+from mapanything.datasets.wai.a3dsynl import A3DSynLargeWAI   # noqa
+from mapanything.datasets.wai.a3dsyns import A3DSynSmallWAI   # noqa
 from mapanything.datasets.wai.a3dscenes_instance import A3DScenesWAIInstance # noqa
+from mapanything.datasets.wai.a3dscenes_depth_completion import A3DScenesDepthCompletionWAI # noqa
 
 def get_test_data_loader(
     dataset, batch_size, num_workers=8, shuffle=False, drop_last=False, pin_mem=True
