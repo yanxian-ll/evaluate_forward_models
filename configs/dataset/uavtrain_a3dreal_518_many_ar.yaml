@@ -12,14 +12,12 @@ train:
 resolution_train: ${dataset.resolution_options.518_many_ar}
 
 # Validation Resolution
-resolution_val_blendedmvs: ${dataset.resolution_options.518_1_33_ar}
-resolution_val_whuomvs: ${dataset.resolution_options.518_2_00_ar}
-resolution_val_a3dscenes: ${dataset.resolution_options.518_1_33_ar}
+resolution_val_a3dreal: ${dataset.resolution_options.518_1_33_ar}
 
 # Training Set
 train_dataset:
-  "+ 50_000 @ ${dataset.a3dscenes_wai.train.dataset_str}"
+  "+ 50_000 @ ${dataset.a3dreal_wai.train.dataset_str}"
 
 # Validation Set
 test_dataset:
-   "+ 500 @ ${dataset.a3dscenes_wai.val.dataset_str}"
+   "+ 500 @ ${dataset.a3dreal_wai.val.dataset_str}"

@@ -10,11 +10,9 @@ import cv2
 import numpy as np
 
 from mapanything.datasets.base.base_dataset import BaseDataset
-from mapanything.utils.wai.core import load_data, load_frame
-from mapanything.datasets.utils.csr_utils import _csr_sampling, _load_covis_graph 
+from mapanything.datasets.wai.a3dreal import A3DRealWAI
 
-
-class A3DSynLargeWAI(BaseDataset):
+class A3DSynLargeWAI(A3DRealWAI):
     """
     A3D-Syn-L dataset containing object-centric and birds-eye-view scenes.
     """
@@ -36,26 +34,25 @@ class A3DSynLargeWAI(BaseDataset):
         walk_topk_step: int = 50,
         **kwargs,
     ):
-        super().__init__(*args, **kwargs)
-        self.ROOT = ROOT
-        self.dataset_metadata_dir = dataset_metadata_dir
-        self.split = split
-        self.overfit_num_sets = overfit_num_sets
-        self.sample_specific_scene = sample_specific_scene
-        self.specific_scene_name = specific_scene_name
-        self._load_data()
-
-        # Define the dataset type flags
-        self.is_metric_scale = True
+        super().__init__(
+            *args, 
+            ROOT=ROOT,
+            dataset_metadata_dir=dataset_metadata_dir,
+            split=split,
+            overfit_num_sets=overfit_num_sets,
+            sample_specific_scene=sample_specific_scene,
+            specific_scene_name=specific_scene_name,
+            load_modalities=load_modalities,
+            covisibility_thres_max=covisibility_thres_max,
+            sampling_mode=sampling_mode,
+            walk_restart_prob=walk_restart_prob,
+            walk_temperature=walk_temperature,
+            walk_topk_step=walk_topk_step,
+            **kwargs
+        )
+        # Indicate synthetic dataset
         self.is_synthetic = True
-
-        # Define the sampling parameters
-        self.covisibility_thres_max = covisibility_thres_max
-        self.sampling_mode = sampling_mode
-        self.walk_restart_prob = walk_restart_prob
-        self.walk_temperature = walk_temperature
-        self.walk_topk_step = walk_topk_step
-        self.load_modalities = load_modalities
+        self.is_metric_scale = True
 
     def _load_data(self):
         split_metadata_path = os.path.join(
@@ -71,152 +68,11 @@ class A3DSynLargeWAI(BaseDataset):
             self.scenes = [self.specific_scene_name]
         self.num_of_scenes = len(self.scenes)
 
-    def _sample_view_indices(
-        self,
-        num_views_to_sample,
-        num_views_in_scene,
-        view_covis_graph,
-        use_bidirectional_covis: bool = True,
-    ):
-        """
-        Sample view indices using specified sampling mode.
-        
-        Args:
-            num_views_to_sample: Number of views to sample.
-            num_views_in_scene: Total number of views in scene.
-            view_covis_graph: View-level covisibility graph.
-            sampling_mode: Sampling mode, "random_walk" or "greedy_chain".
-            use_bidirectional_covis: Whether to use bidirectional edge weights.
-            
-        Returns:
-            Array of sampled view indices.
-        """
-        if num_views_to_sample == num_views_in_scene:
-            return self._rng.permutation(num_views_in_scene)
-        if num_views_to_sample > num_views_in_scene:
-            return self._rng.choice(num_views_in_scene, size=num_views_to_sample, replace=True)
-
-        view_indices = _csr_sampling(
-            view_covis_graph,
-            num_views_to_sample,
-            rng=self._rng,
-            sampling_mode=self.sampling_mode,
-            use_bidirectional_covis=use_bidirectional_covis,
-            covisibility_thres=self.covisibility_thres,
-            covisibility_thres_max=self.covisibility_thres_max,
-            walk_restart_prob=self.walk_restart_prob,
-            walk_temperature=self.walk_temperature,
-            topk_step=self.walk_topk_step,
-        )
-        
-        if len(view_indices) < num_views_to_sample and len(view_indices) > 0:
-            view_indices = self._rng.choice(view_indices, size=num_views_to_sample, replace=True)
-        if len(view_indices) == 0:
-            view_indices = self._rng.choice(num_views_in_scene, size=num_views_to_sample, replace=True)
-        return view_indices
-
-
     def _get_views(self, sampled_idx, num_views_to_sample, resolution):
-        """
-        Get views for a given scene index using specified sampling mode.
-        
-        Args:
-            sampled_idx: Scene index.
-            num_views_to_sample: Number of views to sample.
-            resolution: Target image resolution.
-            sampling_mode: Sampling mode, "random_walk" or "greedy_chain".
-            use_bidirectional_covis: Whether to use bidirectional edge weights.
-            
-        Returns:
-            List of view dictionaries.
-        """
-        scene_index = sampled_idx
-        scene_name = self.scenes[scene_index]
-        scene_root = os.path.join(self.ROOT, scene_name)
-
-        scene_meta = load_data(os.path.join(scene_root, "scene_meta.json"), "scene_meta")
-        scene_file_names = list(scene_meta["frame_names"].keys())
-        num_views_in_scene = len(scene_file_names)
-
-        # Load view graph for sampling
-        g_view = _load_covis_graph(scene_root, scene_meta)
-
-        # Sample view indices using specified sampling mode
-        view_indices = self._sample_view_indices(
-            num_views_to_sample=num_views_to_sample,
-            num_views_in_scene=num_views_in_scene,
-            view_covis_graph=g_view,
-        )
-
-        # Load frames for selected indices
-        views = []
-        for view_index in view_indices:
-            view_file_name = scene_file_names[int(view_index)]
-            view_data = load_frame(
-                scene_root,
-                view_file_name,
-                # modalities=["image", "depth", "mask"],
-                modalities=self.load_modalities,
-                scene_meta=scene_meta,
-            )
-
-            raw_image = view_data["image"].permute(1, 2, 0).numpy()  # (H,W,3)
-            raw_image = (raw_image * 255).astype(np.uint8)
-            
-            if "depth" in self.load_modalities:
-                depthmap = view_data["depth"].numpy().astype(np.float32)
-            elif "depth_da3" in self.load_modalities:
-                depthmap = view_data["depth_da3"].numpy().astype(np.float32)
-            elif "depth_complete" in self.load_modalities:
-                depthmap = view_data["depth_complete"].numpy().astype(np.float32)
-            else:
-                raise ValueError(f"Depth map not found in the loaded modalities {self.load_modalities}.")
-            
-            intrinsics = view_data["intrinsics"].numpy().astype(np.float32)
-            c2w_pose = view_data["extrinsics"].numpy().astype(np.float32)
-
-            depthmap = np.nan_to_num(depthmap, nan=0.0, posinf=0.0, neginf=0.0)
-
-            # Generate valid mask from depthmap
-            if "mask" not in view_data:
-                view_data["mask"] = torch.tensor(depthmap > 0.0, device=view_data["intrinsics"].device)
-
-            non_ambiguous_mask = view_data["mask"].numpy().astype(int)
-            non_ambiguous_mask = cv2.resize(
-                non_ambiguous_mask,
-                (raw_image.shape[1], raw_image.shape[0]),
-                interpolation=cv2.INTER_NEAREST,
-            )
-
-            depthmap = np.where(non_ambiguous_mask, depthmap, 0)
-
-            additional_quantities_to_resize = [non_ambiguous_mask]
-            image, depthmap, intrinsics, additional_quantities_to_resize = (
-                self._crop_resize_if_necessary(
-                    image=raw_image,
-                    resolution=resolution,
-                    depthmap=depthmap,
-                    intrinsics=intrinsics,
-                    additional_quantities=additional_quantities_to_resize,
-                )
-            )
-            non_ambiguous_mask = additional_quantities_to_resize[0]
-
-            views.append(
-                dict(
-                    img=image,
-                    depthmap=depthmap,
-                    camera_pose=c2w_pose,  # cam2world
-                    camera_intrinsics=intrinsics,
-                    non_ambiguous_mask=non_ambiguous_mask,
-                    dataset="A3D-Real",
-                    label=scene_name,
-                    instance=os.path.join("images", str(view_file_name)),
-                )
-            )
-
+        views = super()._get_views(sampled_idx, num_views_to_sample, resolution)
+        for view in views:
+            view["dataset"] = "A3D-Syn-L"
         return views
-
 
 def get_parser():
     import argparse

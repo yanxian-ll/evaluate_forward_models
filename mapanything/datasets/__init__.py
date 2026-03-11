@@ -26,7 +26,7 @@ from mapanything.datasets.wai.tav2_wb import TartanAirV2WBWAI  # noqa
 from mapanything.datasets.wai.unrealstereo4k import UnrealStereo4KWAI  # noqa
 from mapanything.utils.train_tools import get_rank, get_world_size
 
-from mapanything.datasets.wai.whu_luojia_whuomvs import WHULuoJiaWHUOMVSWAI # noqa
+from mapanything.datasets.wai.whu_whuomvs import WHUWHUOMVSWAI # noqa
 from mapanything.datasets.wai.uavscenes import UAVScenesWAI # noqa
 # from mapanything.datasets.wai.ortholoc import OrthoLocWAI # noqa
 from mapanything.datasets.wai.a3dreal import A3DRealWAI       # noqa
