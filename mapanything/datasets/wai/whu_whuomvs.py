@@ -3,13 +3,7 @@ WHUMVS WHUOMVS Dataset using WAI format data.
 """
 
 import os
-import json
-
-import torch
-import cv2
 import numpy as np
-
-from mapanything.datasets.base.base_dataset import BaseDataset
 from mapanything.datasets.wai.a3dreal import A3DRealWAI
 
 class WHUWHUOMVSWAI(A3DRealWAI):
