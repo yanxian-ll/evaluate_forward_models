@@ -5,16 +5,17 @@
 # This source code is licensed under the Apache License, Version 2.0
 # found in the LICENSE file in the root directory of this source tree.
 
+#### 在 A3D 数据集上微调后
 export HYDRA_FULL_ERROR=1
 
 # Define the batch sizes and number of views to loop over
 batch_sizes_and_views=(
-    "20 2 benchmark_518_a3dscenes_whuomvs"
-    "20 4 benchmark_518_a3dscenes_whuomvs"
-    "10 8 benchmark_518_a3dscenes_whuomvs"
-    "4 16 benchmark_518_a3dscenes_whuomvs"
-    "3 24 benchmark_518_a3dscenes_whuomvs"
-    "2 32 benchmark_518_a3dscenes_whuomvs"
+    "20 2 benchmark_518_a3d_bmvs"
+    "20 4 benchmark_518_a3d_bmvs"
+    "10 8 benchmark_518_a3d_bmvs"
+    "4 16 benchmark_518_a3d_bmvs"
+    "3 24 benchmark_518_a3d_bmvs"
+    "2 32 benchmark_518_a3d_bmvs"
 )
 
 # Loop through each combination

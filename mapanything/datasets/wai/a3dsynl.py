@@ -3,14 +3,10 @@ A3D-Syn-L Dataset using WAI format data.
 """
 
 import os
-import json
-
-import torch
-import cv2
 import numpy as np
 
-from mapanything.datasets.base.base_dataset import BaseDataset
 from mapanything.datasets.wai.a3dreal import A3DRealWAI
+
 
 class A3DSynLargeWAI(A3DRealWAI):
     """
@@ -28,14 +24,29 @@ class A3DSynLargeWAI(A3DRealWAI):
         specific_scene_name: str = None,
         load_modalities: list = ["image", "depth"],
         covisibility_thres_max: float = 1.0,
-        sampling_mode: str = "random_walk",
+
+        # sampling mode
+        sampling_mode: str = "random_walk",   # "anchor_star" | "random_walk" | "tree" | "greedy_chain" | "mixed"
+
+        # random-walk params
         walk_restart_prob: float = 0.10,
         walk_temperature: float = 1.0,
         walk_topk_step: int = 50,
+
+        # tree params
+        tree_branching: int = 2,
+        tree_trunk_ratio: float = 0.25,
+
+        # mixed sampling probabilities
+        mixed_anchor_star_prob: float = 0.50,
+        mixed_random_walk_prob: float = 0.25,
+        mixed_tree_prob: float = 0.15,
+        mixed_greedy_chain_prob: float = 0.10,
+
         **kwargs,
     ):
         super().__init__(
-            *args, 
+            *args,
             ROOT=ROOT,
             dataset_metadata_dir=dataset_metadata_dir,
             split=split,
@@ -48,9 +59,15 @@ class A3DSynLargeWAI(A3DRealWAI):
             walk_restart_prob=walk_restart_prob,
             walk_temperature=walk_temperature,
             walk_topk_step=walk_topk_step,
-            **kwargs
+            tree_branching=tree_branching,
+            tree_trunk_ratio=tree_trunk_ratio,
+            mixed_anchor_star_prob=mixed_anchor_star_prob,
+            mixed_random_walk_prob=mixed_random_walk_prob,
+            mixed_tree_prob=mixed_tree_prob,
+            mixed_greedy_chain_prob=mixed_greedy_chain_prob,
+            **kwargs,
         )
-        # Indicate synthetic dataset
+
         self.is_synthetic = True
         self.is_metric_scale = True
 

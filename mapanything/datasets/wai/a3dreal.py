@@ -16,7 +16,6 @@ class A3DRealWAI(BaseDataset):
     """
     A3D-Real dataset containing object-centric and birds-eye-view scenes.
     """
-
     def __init__(
         self,
         *args,
@@ -28,10 +27,25 @@ class A3DRealWAI(BaseDataset):
         specific_scene_name: str = None,
         load_modalities: list = ["image", "depth", "mask"],
         covisibility_thres_max: float = 1.0,
-        sampling_mode: str = "random_walk",
+
+        # sampling mode
+        sampling_mode: str = "random_walk",   # "anchor_star" | "random_walk" | "tree" | "greedy_chain" | "mixed"
+
+        # random-walk params
         walk_restart_prob: float = 0.10,
         walk_temperature: float = 1.0,
         walk_topk_step: int = 50,
+
+        # tree params
+        tree_branching: int = 2,
+        tree_trunk_ratio: float = 0.25,
+
+        # mixed sampling probabilities
+        mixed_anchor_star_prob: float = 0.50,
+        mixed_random_walk_prob: float = 0.25,
+        mixed_tree_prob: float = 0.15,
+        mixed_greedy_chain_prob: float = 0.10,
+
         **kwargs,
     ):
         super().__init__(*args, **kwargs)
@@ -43,16 +57,23 @@ class A3DRealWAI(BaseDataset):
         self.specific_scene_name = specific_scene_name
         self._load_data()
 
-        # Define the dataset type flags
         self.is_metric_scale = True
         self.is_synthetic = False
 
-        # Define the sampling parameters
         self.covisibility_thres_max = covisibility_thres_max
         self.sampling_mode = sampling_mode
         self.walk_restart_prob = walk_restart_prob
         self.walk_temperature = walk_temperature
         self.walk_topk_step = walk_topk_step
+
+        self.tree_branching = tree_branching
+        self.tree_trunk_ratio = tree_trunk_ratio
+
+        self.mixed_anchor_star_prob = mixed_anchor_star_prob
+        self.mixed_random_walk_prob = mixed_random_walk_prob
+        self.mixed_tree_prob = mixed_tree_prob
+        self.mixed_greedy_chain_prob = mixed_greedy_chain_prob
+
         self.load_modalities = load_modalities
 
     def _load_data(self):
@@ -78,41 +99,52 @@ class A3DRealWAI(BaseDataset):
     ):
         """
         Sample view indices using specified sampling mode.
-        
-        Args:
-            num_views_to_sample: Number of views to sample.
-            num_views_in_scene: Total number of views in scene.
-            view_covis_graph: View-level covisibility graph.
-            sampling_mode: Sampling mode, "random_walk" or "greedy_chain".
-            use_bidirectional_covis: Whether to use bidirectional edge weights.
-            
-        Returns:
-            Array of sampled view indices.
         """
         if num_views_to_sample == num_views_in_scene:
             return self._rng.permutation(num_views_in_scene)
+
         if num_views_to_sample > num_views_in_scene:
-            return self._rng.choice(num_views_in_scene, size=num_views_to_sample, replace=True)
+            return self._rng.choice(
+                num_views_in_scene,
+                size=num_views_to_sample,
+                replace=True,
+            )
 
         view_indices = _csr_sampling(
-            view_covis_graph,
-            num_views_to_sample,
+            view_graph=view_covis_graph,
+            num_of_samples=num_views_to_sample,
             rng=self._rng,
             sampling_mode=self.sampling_mode,
             use_bidirectional_covis=use_bidirectional_covis,
             covisibility_thres=self.covisibility_thres,
             covisibility_thres_max=self.covisibility_thres_max,
+            topk_step=self.walk_topk_step,
             walk_restart_prob=self.walk_restart_prob,
             walk_temperature=self.walk_temperature,
-            topk_step=self.walk_topk_step,
+            tree_branching=self.tree_branching,
+            tree_trunk_ratio=self.tree_trunk_ratio,
+            mixed_anchor_star_prob=self.mixed_anchor_star_prob,
+            mixed_random_walk_prob=self.mixed_random_walk_prob,
+            mixed_tree_prob=self.mixed_tree_prob,
+            mixed_greedy_chain_prob=self.mixed_greedy_chain_prob,
         )
-        
-        if len(view_indices) < num_views_to_sample and len(view_indices) > 0:
-            view_indices = self._rng.choice(view_indices, size=num_views_to_sample, replace=True)
-        if len(view_indices) == 0:
-            view_indices = self._rng.choice(num_views_in_scene, size=num_views_to_sample, replace=True)
-        return view_indices
 
+        if len(view_indices) < num_views_to_sample and len(view_indices) > 0:
+            view_indices = self._rng.choice(
+                view_indices,
+                size=num_views_to_sample,
+                replace=True,
+            )
+
+        if len(view_indices) == 0:
+            view_indices = self._rng.choice(
+                num_views_in_scene,
+                size=num_views_to_sample,
+                replace=True,
+            )
+
+        return view_indices
+    
 
     def _get_views(self, sampled_idx, num_views_to_sample, resolution):
         """

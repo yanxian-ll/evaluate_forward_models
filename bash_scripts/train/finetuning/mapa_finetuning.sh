@@ -5,6 +5,9 @@
 # This source code is licensed under the Apache License, Version 2.0
 # found in the LICENSE file in the root directory of this source tree.
 
+# 
+# pkill -f python
+
 NUM_GPUS=$1
 
 # Logging Configs
@@ -22,36 +25,27 @@ export FI_EFA_SET_CUDA_SYNC_MEMOPS=0
 export NCCL_BUFFSIZE=8388608
 export NCCL_P2P_NET_CHUNKSIZE=524288
 
-# torchrun --nproc_per_node ${NUM_GPUS} \
-#     scripts/train.py \
-#     machine=aws \
-#     dataset=megatrain_13d_518_many_ar_24ipg_8g dataset.num_workers=12 \
-#     dataset.num_views=4 \
-#     dataset.principal_point_centered=true \
-#     loss=pi3_loss \
-#     model=pi3 \
-#     train_params=pi3_finetune \
-#     train_params.epochs=10 \
-#     train_params.warmup_epochs=1 \
-#     train_params.keep_freq=20 \
-#     train_params.max_num_of_imgs_per_gpu=24 \
-#     hydra.run.dir='${root_experiments_dir}/mapanything/training/pi3_finetuning'
-
-
 torchrun --nproc_per_node ${NUM_GPUS} \
     scripts/train.py \
     machine=aws \
     dataset=uavtrain_a3dall_518_many_ar_16ipg_2g \
-    dataset.num_workers=4 \
+    dataset.num_workers=12 \
     dataset.num_views=16 \
-    dataset.principal_point_centered=true \
-    loss=pi3_loss \
-    model=pi3 \
-    model.model_config.pretrained_model_name_or_path="./checkpoints/pi3" \
-    train_params=pi3_finetune \
-    train_params.epochs=10 \
+    loss=overall_loss_weigh_pm_higher \
+    model=mapanything_v1 \
+    model/task=aug_training \
+    model.encoder.gradient_checkpointing=true \
+    model.info_sharing.module_args.gradient_checkpointing=true \
+    model.pred_head.gradient_checkpointing=true \
+    model.pretrained='checkpoints/map-anything-v1/map-anything-v1.pth' \
+    train_params=finetune_with_lower_encoder_lr \
+    train_params.lr=1e-05 \
+    train_params.min_lr=1e-07 \
+    train_params.submodule_configs.encoder.lr=5e-07 \
+    train_params.submodule_configs.encoder.min_lr=5e-09 \
+    train_params.epochs=20 \
     train_params.warmup_epochs=1 \
     train_params.accum_iter=8 \
     train_params.keep_freq=20 \
     train_params.max_num_of_imgs_per_gpu=16 \
-    hydra.run.dir='${root_experiments_dir}/mapanything/training/pi3_finetuning'
+    hydra.run.dir='${root_experiments_dir}/mapanything/training/mapa_finetuning_aug_training'

@@ -13,26 +13,20 @@ resolution_train: ${dataset.resolution_options.518_many_ar}
 
 # Validation Resolution
 resolution_val_blendedmvs: ${dataset.resolution_options.518_1_33_ar}
-resolution_val_whuomvs: ${dataset.resolution_options.518_2_00_ar}
 resolution_val_a3dreal: ${dataset.resolution_options.518_1_33_ar}
 resolution_val_a3dsynl: ${dataset.resolution_options.518_1_33_ar}
 resolution_val_a3dsyns: ${dataset.resolution_options.518_1_33_ar}
 
 # Training Set
 train_dataset:
-  "+ 10_000 @ ${dataset.blendedmvs_wai.train.dataset_str}
-  + 10_000 @ ${dataset.uavscenes_wai.train.dataset_str}
-  + 10_000 @ ${dataset.whu_whuomvs_wai.train.dataset_str}
-  + 30_000 @ ${dataset.a3dreal_wai.train.dataset_str}
-  + 30_000 @ ${dataset.a3dsynl_wai.train.dataset_str}
-  + 10_000 @ ${dataset.a3dsyns_wai.train.dataset_str}"
-
+  "+ 50_000 @ ${dataset.blendedmvs_wai.train.dataset_str}
+  + 50_000 @ ${dataset.a3dreal_wai.train.dataset_str}
+  + 50_000 @ ${dataset.a3dsynl_wai.train.dataset_str}
+  + 18_000 @ ${dataset.a3dsyns_wai.train.dataset_str}"
 
 # Validation Set
 test_dataset:
-   "+ 100 @ ${dataset.blendedmvs_wai.val.dataset_str} 
-   + 100 @ ${dataset.whu_whuomvs_wai.val.dataset_str}
-   + 200 @ ${dataset.a3dreal_wai.val.dataset_str}
-   + 200 @ ${dataset.a3dsynl_wai.val.dataset_str}
-   + 100 @ ${dataset.a3dsyns_wai.val.dataset_str}"
-
+   "+ 500 @ ${dataset.blendedmvs_wai.val.dataset_str}
+   + 500 @ ${dataset.a3dreal_wai.val.dataset_str}
+   + 500 @ ${dataset.a3dsynl_wai.val.dataset_str}
+   + 250 @ ${dataset.a3dsyns_wai.val.dataset_str}"

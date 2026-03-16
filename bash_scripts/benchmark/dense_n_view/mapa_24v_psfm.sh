@@ -46,12 +46,12 @@
 
 # Define the batch sizes and number of views to loop over
 batch_sizes_and_views=(
-    "2 32 benchmark_518_a3dscenes_whuomvs"
-    "30 2 benchmark_518_a3dscenes_whuomvs"
-    "15 4 benchmark_518_a3dscenes_whuomvs"
-    "8 8 benchmark_518_a3dscenes_whuomvs"
-    "4 16 benchmark_518_a3dscenes_whuomvs"
-    "3 24 benchmark_518_a3dscenes_whuomvs"
+    "2 32 benchmark_518_a3d_bmvs"
+    "30 2 benchmark_518_a3d_bmvs"
+    "15 4 benchmark_518_a3d_bmvs"
+    "8 8 benchmark_518_a3d_bmvs"
+    "4 16 benchmark_518_a3d_bmvs"
+    "3 24 benchmark_518_a3d_bmvs"
 )
 
 # Loop through each combination

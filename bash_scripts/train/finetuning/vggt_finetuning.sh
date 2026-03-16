@@ -40,7 +40,7 @@ export NCCL_P2P_NET_CHUNKSIZE=524288
 torchrun --nproc_per_node ${NUM_GPUS} \
     scripts/train.py \
     machine=aws \
-    dataset=uavtrain_7d_518_many_ar \
+    dataset=uavtrain_a3dall_518_many_ar_16ipg_2g \
     dataset.num_workers=4 \
     dataset.num_views=16 \
     dataset.principal_point_centered=true \

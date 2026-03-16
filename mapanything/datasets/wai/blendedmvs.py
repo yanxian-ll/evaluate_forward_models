@@ -11,7 +11,7 @@ import os
 
 import cv2
 import numpy as np
-
+import torch
 from mapanything.datasets.base.base_dataset import BaseDataset
 from mapanything.utils.wai.core import load_data, load_frame
 
@@ -113,7 +113,8 @@ class BlendedMVSWAI(BaseDataset):
             view_data = load_frame(
                 scene_root,
                 view_file_name,
-                modalities=["image", "depth", "pred_mask/moge2"],
+                # modalities=["image", "depth", "pred_mask/moge2"],
+                modalities=["image", "depth"],
                 scene_meta=scene_meta,
             )
 
@@ -127,8 +128,19 @@ class BlendedMVSWAI(BaseDataset):
             # Ensure that the depthmap has all valid values
             depthmap = np.nan_to_num(depthmap, nan=0.0, posinf=0.0, neginf=0.0)
 
-            # Get the non_ambiguous_mask and ensure it matches image resolution
-            non_ambiguous_mask = view_data["pred_mask/moge2"].numpy().astype(int)
+            # # Get the non_ambiguous_mask and ensure it matches image resolution
+            # non_ambiguous_mask = view_data["pred_mask/moge2"].numpy().astype(int)
+            # non_ambiguous_mask = cv2.resize(
+            #     non_ambiguous_mask,
+            #     (image.shape[1], image.shape[0]),
+            #     interpolation=cv2.INTER_NEAREST,
+            # )
+
+            # Generate valid mask from depthmap
+            if "mask" not in view_data:
+                view_data["mask"] = torch.tensor(depthmap > 0.0, device=view_data["intrinsics"].device)
+
+            non_ambiguous_mask = view_data["mask"].numpy().astype(int)
             non_ambiguous_mask = cv2.resize(
                 non_ambiguous_mask,
                 (image.shape[1], image.shape[0]),

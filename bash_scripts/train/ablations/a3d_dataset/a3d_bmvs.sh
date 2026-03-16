@@ -1,12 +1,3 @@
-#!/bin/bash
-
-# Copyright (c) Meta Platforms, Inc. and affiliates.
-#
-# This source code is licensed under the Apache License, Version 2.0
-# found in the LICENSE file in the root directory of this source tree.
-
-# 
-# pkill -f python
 
 NUM_GPUS=$1
 
@@ -28,7 +19,7 @@ export NCCL_P2P_NET_CHUNKSIZE=524288
 torchrun --nproc_per_node ${NUM_GPUS} \
     scripts/train.py \
     machine=aws \
-    dataset=uavtrain_7d_518_many_ar \
+    dataset=uavtrain_a3d_bmvs_518_many_ar_16ipg_2g \
     dataset.num_workers=12 \
     dataset.num_views=16 \
     loss=overall_loss_weigh_pm_higher \
@@ -48,4 +39,4 @@ torchrun --nproc_per_node ${NUM_GPUS} \
     train_params.accum_iter=8 \
     train_params.keep_freq=20 \
     train_params.max_num_of_imgs_per_gpu=16 \
-    hydra.run.dir='${root_experiments_dir}/mapanything/training/mapa_finetuning_aug_training'
+    hydra.run.dir='${root_experiments_dir}/mapanything/training_ablations/a3dall'
