@@ -9,8 +9,8 @@ model_config:
   load_custom_ckpt: false
   # Custom checkpoint path
   custom_ckpt_path: null
-  # VGGT model name or path
-  pretrained_model_name_or_path: "facebook/VGGT-1B"
+  # VGGT model name or path  facebook/VGGT-1B
+  pretrained_model_name_or_path: "checkpoints/vggt"
 # Image Normalization Type
 data_norm_type: "identity"
 # VGGT checkpoint is already loaded in the inference wrapper
