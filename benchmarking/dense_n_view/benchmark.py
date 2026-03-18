@@ -56,27 +56,46 @@ log = logging.getLogger(__name__)
 
 def write_ply_xyzrgb(path, points, colors_u8):
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    N = points.shape[0]
-    assert colors_u8.shape[0] == N
+    points = np.asarray(points, dtype=np.float32)
+    colors_u8 = np.asarray(colors_u8, dtype=np.uint8)
+
+    assert points.shape[0] == colors_u8.shape[0]
+    n = points.shape[0]
+
+    vertex = np.empty(
+        n,
+        dtype=[
+            ("x", "<f4"),
+            ("y", "<f4"),
+            ("z", "<f4"),
+            ("red", "u1"),
+            ("green", "u1"),
+            ("blue", "u1"),
+        ],
+    )
+    vertex["x"] = points[:, 0]
+    vertex["y"] = points[:, 1]
+    vertex["z"] = points[:, 2]
+    vertex["red"] = colors_u8[:, 0]
+    vertex["green"] = colors_u8[:, 1]
+    vertex["blue"] = colors_u8[:, 2]
 
     header = "\n".join([
         "ply",
-        "format ascii 1.0",
-        f"element vertex {N}",
+        "format binary_little_endian 1.0",
+        f"element vertex {n}",
         "property float x",
         "property float y",
         "property float z",
         "property uchar red",
         "property uchar green",
         "property uchar blue",
-        "end_header",
-    ])
+        "end_header\n",
+    ]).encode("ascii")
 
-    with open(path, "w") as f:
-        f.write(header + "\n")
-        for p, c in zip(points, colors_u8):
-            f.write(f"{p[0]} {p[1]} {p[2]} {int(c[0])} {int(c[1])} {int(c[2])}\n")
-
+    with open(path, "wb") as f:
+        f.write(header)
+        vertex.tofile(f)
 
 def get_all_info_for_metric_computation(batch, preds, norm_mode="avg_dis"):
     """
@@ -386,8 +405,11 @@ def benchmark(args):
             gt_info, pr_info, valid_masks, gt_info_abs, pr_info_abs_aligned, scale_factors = get_all_info_for_metric_computation(batch, preds)
 
             batch_size = batch[0]["img"].shape[0]
+            compute_abs = bool(args.get("compute_abs_metrics", False))
             for batch_idx in range(batch_size):
                 scene = batch[0]["label"][batch_idx]
+                k = per_scene_saved[scene]
+                need_save_fused = (max_sets_per_scene > 0) and (k < max_sets_per_scene)
 
                 metrics, fused_debug = compute_set_metrics(
                     batch_views=batch,
@@ -396,17 +418,17 @@ def benchmark(args):
                     pr_info=pr_info,
                     valid_masks=valid_masks,
                     gt_info_abs=gt_info_abs,
-                    pr_info_abs=pr_info_abs_aligned,   # important: scaled pred abs
+                    pr_info_abs=pr_info_abs_aligned,
                     scale_factors=scale_factors,
                     device=device,
-                    voxel=0.1,
-                    icp_iters=20,
+                    voxel=0.25,
+                    icp_iters=5,
                     trim_ratio=0.8,
                     sim3_trim_ratio=0.8,
                     sim3_iters=1,
                     max_samples_per_view_abs=500,
-                    return_fused_debug=True,
-                    compute_abs_metrics=args.get("compute_abs_metrics", False),
+                    return_fused_debug=need_save_fused,
+                    compute_abs_metrics=compute_abs,
                 )
 
                 # save ply if needed

@@ -23,3 +23,5 @@ amp: 1
 amp_dtype: "bf16"
 # compute absolute metrics
 compute_abs_metrics: true
+# save num fused points per scene
+save_n_fused_ply: 5
