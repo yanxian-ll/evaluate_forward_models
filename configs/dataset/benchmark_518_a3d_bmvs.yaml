@@ -12,7 +12,7 @@ covisibility_thres_max: 1.0
 sampling_mode: "random_walk" 
 
 # Test Resolution
-resolution_test_blendedmvs: ${dataset.resolution_options.512_1_33_ar} 
+resolution_test_blendedmvs: ${dataset.resolution_options.518_1_33_ar} 
 resolution_test_a3dreal: ${dataset.resolution_options.518_1_52_ar}
 resolution_test_a3dsynl: ${dataset.resolution_options.518_1_52_ar}
 

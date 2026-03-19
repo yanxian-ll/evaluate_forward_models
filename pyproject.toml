@@ -35,6 +35,8 @@ dependencies = [
 data = ["pandas"]
 dev = ["pre-commit", "pytest", "pytest-cov", "ruff"]
 
+lightglue = ["lightglue @ file:third_party/LightGlue"]
+
 colmap = [
     "lightglue @ file:third_party/LightGlue",
     "open3d",
@@ -70,7 +72,7 @@ all = [
     "mapanything[dev]",
     "mapanything[dust3r]",
     "mapanything[gradio]",
-    "mapanything[hunyuanworld-mirror]",
+    #"mapanything[hunyuanworld-mirror]",
     "mapanything[mast3r]",
     "mapanything[must3r]",
     "mapanything[pi3]",

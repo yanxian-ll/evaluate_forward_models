@@ -1,0 +1,21 @@
+defaults:
+  - default
+
+# Number of views parameter for the multi-view datasets
+num_views: 2
+
+# Covisibility threshold for the multi-view datasets
+covisibility_thres_min: 0.2
+covisibility_thres_max: 1.0
+
+# Sampling mode for the A3D dataset
+sampling_mode: "random_walk" 
+
+# Test Resolution
+resolution_test_a3dsynl: ${dataset.resolution_options.518_1_33_ar} 
+
+# Test Set
+# BlendedMVS: Sample 5 multi-view sets from each scene, 50 test scenes in total
+test_dataset:
+  "+ 150 @ ${dataset.a3dsynl_wai.test.dataset_str}"
+  

@@ -1,0 +1,3 @@
+[submodule "third_party/AnyCalib"]
+	path = third_party/AnyCalib
+	url = https://github.com/javrtg/AnyCalib.git
