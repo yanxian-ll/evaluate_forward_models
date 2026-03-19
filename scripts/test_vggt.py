@@ -7,6 +7,8 @@ Extended VGGT test script with:
 2. Cross-view patch correspondence visualization.
 3. LightGlue-based sparse matching + multi-view track construction.
 4. Tie-point prior injection into VGGT middle global attention layers.
+5. Bias visualization.
+6. Delta-logits / delta-attention comparison between injected and baseline runs.
 
 This file is intended to be dropped into `scripts/test_vggt.py` with minimal
 repository intrusion.
@@ -606,12 +608,14 @@ class VGGTAttentionController:
         inject_layers: Sequence[int],
         head_gains: Optional[Sequence[float]] = None,
         layer_lambda: float = 1.0,
+        skip_layers: Optional[Sequence[int]] = None,
     ):
         self.wrapper = model_wrapper
         self.core_model = model_wrapper.model
         self.aggregator = self.core_model.aggregator
         self.capture_layers = list(capture_layers)
         self.inject_layers = list(inject_layers)
+        self.skip_layers = sorted(set(skip_layers or []))
         self.layer_lambda = layer_lambda
         self.head_gains = head_gains
         self.saved_attn: Dict[int, torch.Tensor] = {}
@@ -666,8 +670,20 @@ class VGGTAttentionController:
 
         attn_module.forward = types.MethodType(patched_forward, attn_module)
 
+    def _patch_skip_block(self, block_module: torch.nn.Module, layer_idx: int) -> None:
+        block_module._skip_enabled = True
+        block_module._layer_idx = layer_idx
+
+        def skipped_forward(this, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
+            return x
+
+        block_module.forward = types.MethodType(skipped_forward, block_module)
+
     def _patch_global_blocks(self) -> None:
         for layer_idx, block in enumerate(self.aggregator.global_blocks):
+            if layer_idx in self.skip_layers:
+                self._patch_skip_block(block, layer_idx)
+                continue
             if layer_idx in self.capture_layers or layer_idx in self.inject_layers:
                 self._patch_single_attention(block.attn, layer_idx)
 
@@ -675,6 +691,8 @@ class VGGTAttentionController:
         self.saved_attn.clear()
         self.saved_logits.clear()
         for layer_idx, block in enumerate(self.aggregator.global_blocks):
+            if layer_idx in self.skip_layers:
+                continue
             if hasattr(block.attn, "_capture_enabled"):
                 block.attn._capture_enabled = False
             if hasattr(block.attn, "_external_bias"):
@@ -682,8 +700,11 @@ class VGGTAttentionController:
 
     def enable_capture(self, enabled: bool = True) -> None:
         for layer_idx in self.capture_layers:
+            if layer_idx in self.skip_layers:
+                continue
             block = self.aggregator.global_blocks[layer_idx]
-            block.attn._capture_enabled = enabled
+            if hasattr(block, "attn") and hasattr(block.attn, "_capture_enabled"):
+                block.attn._capture_enabled = enabled
 
     def set_bias(
         self,
@@ -693,6 +714,8 @@ class VGGTAttentionController:
         per_layer_lambdas: Optional[Dict[int, float]] = None,
     ) -> None:
         for layer_idx, block in enumerate(self.aggregator.global_blocks):
+            if layer_idx in self.skip_layers:
+                continue
             if not hasattr(block.attn, "_external_bias"):
                 continue
 
@@ -724,6 +747,9 @@ class VGGTAttentionController:
 
     def get_attention(self, layer_idx: int) -> Optional[torch.Tensor]:
         return self.saved_attn.get(layer_idx, None)
+
+    def get_logits(self, layer_idx: int) -> Optional[torch.Tensor]:
+        return self.saved_logits.get(layer_idx, None)
 
 
 # -----------------------------------------------------------------------------
@@ -770,6 +796,18 @@ def _prepare_attention_tensor(attn: torch.Tensor) -> torch.Tensor:
     return attn.float().cpu()
 
 
+def _prepare_bias_tensor(bias: torch.Tensor) -> torch.Tensor:
+    """
+    bias: [1,1,N,N] or [1,H,N,N] or [H,N,N]
+    return: [H,N,N]
+    """
+    if bias.ndim == 4:
+        bias = bias[0]
+    if bias.ndim != 3:
+        raise ValueError(f"Unexpected bias shape: {bias.shape}")
+    return bias.detach().float().cpu()
+
+
 def _extract_pair_attention_block(
     attn: torch.Tensor,
     view_a: int,
@@ -781,6 +819,19 @@ def _extract_pair_attention_block(
     qa = slice(view_a * per_view_tokens + patch_start_idx, (view_a + 1) * per_view_tokens)
     kb = slice(view_b * per_view_tokens + patch_start_idx, (view_b + 1) * per_view_tokens)
     return attn[:, qa, kb]
+
+
+def _extract_pair_bias_block(
+    bias: torch.Tensor,
+    view_a: int,
+    view_b: int,
+    per_view_tokens: int,
+    patch_start_idx: int,
+) -> torch.Tensor:
+    bias = _prepare_bias_tensor(bias)
+    qa = slice(view_a * per_view_tokens + patch_start_idx, (view_a + 1) * per_view_tokens)
+    kb = slice(view_b * per_view_tokens + patch_start_idx, (view_b + 1) * per_view_tokens)
+    return bias[:, qa, kb]
 
 
 def _save_heatmap_matrix(
@@ -833,6 +884,38 @@ def save_attention_view_heatmap(
     plt.close()
 
 
+def save_bias_view_heatmap(
+    bias: torch.Tensor,
+    output_path: Path,
+    num_views: int,
+    per_view_tokens: int,
+    patch_start_idx: int,
+    title: str,
+) -> None:
+    bias = _prepare_bias_tensor(bias).numpy()
+    matrix = np.zeros((num_views, num_views), dtype=np.float32)
+
+    for va in range(num_views):
+        qa = slice(va * per_view_tokens + patch_start_idx, (va + 1) * per_view_tokens)
+        for vb in range(num_views):
+            kb = slice(vb * per_view_tokens + patch_start_idx, (vb + 1) * per_view_tokens)
+            block = bias[:, qa, kb]
+            matrix[va, vb] = block.mean()
+
+    plt.figure(figsize=(6, 5))
+    plt.imshow(matrix, interpolation="nearest")
+    plt.colorbar()
+    plt.xlabel("key view")
+    plt.ylabel("query view")
+    plt.title(title)
+    for i in range(num_views):
+        for j in range(num_views):
+            plt.text(j, i, f"{matrix[i, j]:.3f}", ha="center", va="center", fontsize=8)
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=200)
+    plt.close()
+
+
 def save_attention_pair_matrix(
     attn: torch.Tensor,
     output_path: Path,
@@ -852,6 +935,48 @@ def save_attention_pair_matrix(
     )
     avg = sub.mean(dim=0).numpy()
     base_title = title or f"Attention block view {view_a} -> view {view_b}"
+    _save_heatmap_matrix(
+        avg,
+        output_path,
+        title=f"{base_title} (avg heads)",
+        xlabel=f"key patches in view {view_b}",
+        ylabel=f"query patches in view {view_a}",
+    )
+
+    if not save_per_head:
+        return
+
+    head_dir = ensure_dir(output_path.parent / f"{output_path.stem}_heads")
+    for head_idx in range(sub.shape[0]):
+        _save_heatmap_matrix(
+            sub[head_idx].numpy(),
+            head_dir / f"head_{head_idx:02d}.png",
+            title=f"{base_title} (head {head_idx})",
+            xlabel=f"key patches in view {view_b}",
+            ylabel=f"query patches in view {view_a}",
+        )
+
+
+def save_bias_pair_matrix(
+    bias: torch.Tensor,
+    output_path: Path,
+    view_a: int,
+    view_b: int,
+    per_view_tokens: int,
+    patch_start_idx: int,
+    title: Optional[str] = None,
+    save_per_head: bool = True,
+) -> None:
+    sub = _extract_pair_bias_block(
+        bias=bias,
+        view_a=view_a,
+        view_b=view_b,
+        per_view_tokens=per_view_tokens,
+        patch_start_idx=patch_start_idx,
+    )
+
+    avg = sub.mean(dim=0).numpy()
+    base_title = title or f"Bias block view {view_a} -> view {view_b}"
     _save_heatmap_matrix(
         avg,
         output_path,
@@ -978,6 +1103,116 @@ def save_attention_patch_match_viz(
         )
 
 
+def save_bias_patch_match_viz(
+    bias: torch.Tensor,
+    img_a: np.ndarray,
+    img_b: np.ndarray,
+    output_path: Path,
+    view_a: int,
+    view_b: int,
+    per_view_tokens: int,
+    patch_start_idx: int,
+    patch_size: int,
+    grid_w: int,
+    topk: int = 120,
+    title: Optional[str] = None,
+    save_per_head: bool = True,
+) -> None:
+    sub = _extract_pair_bias_block(
+        bias=bias,
+        view_a=view_a,
+        view_b=view_b,
+        per_view_tokens=per_view_tokens,
+        patch_start_idx=patch_start_idx,
+    )
+
+    avg = sub.mean(dim=0).numpy()
+    base_title = title or f"Bias patch matches view {view_a} -> view {view_b}"
+    _save_single_patch_match_viz(
+        sub=avg,
+        img_a=img_a,
+        img_b=img_b,
+        output_path=output_path,
+        patch_size=patch_size,
+        grid_w=grid_w,
+        topk=topk,
+        title=f"{base_title} (avg heads)",
+    )
+
+    if not save_per_head:
+        return
+
+    head_dir = ensure_dir(output_path.parent / f"{output_path.stem}_heads")
+    for head_idx in range(sub.shape[0]):
+        _save_single_patch_match_viz(
+            sub=sub[head_idx].numpy(),
+            img_a=img_a,
+            img_b=img_b,
+            output_path=head_dir / f"head_{head_idx:02d}.png",
+            patch_size=patch_size,
+            grid_w=grid_w,
+            topk=topk,
+            title=f"{base_title} (head {head_idx})",
+        )
+
+
+def save_delta_pair_matrix(
+    tensor_after: torch.Tensor,
+    tensor_before: torch.Tensor,
+    output_path: Path,
+    view_a: int,
+    view_b: int,
+    per_view_tokens: int,
+    patch_start_idx: int,
+    title: Optional[str] = None,
+    save_per_head: bool = True,
+    is_attention: bool = True,
+) -> None:
+    """
+    tensor_after / tensor_before: [1,H,N,N] or [H,N,N]
+    Save (after - before) for the selected pair block.
+    """
+    after = _prepare_attention_tensor(tensor_after)
+    before = _prepare_attention_tensor(tensor_before)
+
+    qa = slice(view_a * per_view_tokens + patch_start_idx, (view_a + 1) * per_view_tokens)
+    kb = slice(view_b * per_view_tokens + patch_start_idx, (view_b + 1) * per_view_tokens)
+
+    sub = after[:, qa, kb] - before[:, qa, kb]
+    avg = sub.mean(dim=0).numpy()
+
+    kind = "Δattn" if is_attention else "Δlogits"
+    base_title = title or f"{kind} view {view_a} -> view {view_b}"
+
+    plt.figure(figsize=(6.5, 5.5))
+    vmax = np.max(np.abs(avg)) + 1e-8
+    plt.imshow(avg, interpolation="nearest", cmap="bwr", vmin=-vmax, vmax=vmax)
+    plt.colorbar()
+    plt.xlabel(f"key patches in view {view_b}")
+    plt.ylabel(f"query patches in view {view_a}")
+    plt.title(f"{base_title} (avg heads)")
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=200)
+    plt.close()
+
+    if not save_per_head:
+        return
+
+    head_dir = ensure_dir(output_path.parent / f"{output_path.stem}_heads")
+    for head_idx in range(sub.shape[0]):
+        mat = sub[head_idx].numpy()
+        vmax = np.max(np.abs(mat)) + 1e-8
+        plt.figure(figsize=(6.5, 5.5))
+        plt.imshow(mat, interpolation="nearest", cmap="bwr", vmin=-vmax, vmax=vmax)
+        plt.colorbar()
+        plt.xlabel(f"key patches in view {view_b}")
+        plt.ylabel(f"query patches in view {view_a}")
+        plt.title(f"{base_title} (head {head_idx})")
+        plt.tight_layout()
+        plt.savefig(head_dir / f"head_{head_idx:02d}.png", dpi=200)
+        plt.close()
+
+
 def save_tracks_json(tracks: List[Track], output_path: Path) -> None:
     data = []
     for t in tracks:
@@ -1000,40 +1235,157 @@ def save_tracks_json(tracks: List[Track], output_path: Path) -> None:
     save_json(output_path, data)
 
 
+def _normalize_for_vis(x: np.ndarray) -> np.ndarray:
+    mask = np.isfinite(x)
+    if not np.any(mask):
+        return np.zeros_like(x, dtype=np.float32)
+    vals = x[mask]
+    lo, hi = np.percentile(vals, 2), np.percentile(vals, 98)
+    return np.clip((x - lo) / (hi - lo + 1e-6), 0, 1).astype(np.float32)
+
+
+def _prediction_depth_z(pred: Dict[str, torch.Tensor]) -> np.ndarray:
+    if "depth_z" in pred:
+        return pred["depth_z"][0, ..., 0].detach().float().cpu().numpy()
+    if "pts3d_cam" in pred:
+        return pred["pts3d_cam"][0, ..., 2].detach().float().cpu().numpy()
+    if "depth_along_ray" in pred and "ray_directions" in pred:
+        depth_along_ray = pred["depth_along_ray"][0, ..., 0].detach().float().cpu().numpy()
+        ray_dirs = pred["ray_directions"][0].detach().float().cpu().numpy()
+        return depth_along_ray * ray_dirs[..., 2]
+    raise KeyError("Prediction does not contain depth_z, pts3d_cam, or compatible depth_along_ray/ray_directions fields.")
+
+
+def _prediction_rgb(pred: Dict[str, torch.Tensor], fallback_rgb: Optional[np.ndarray] = None) -> np.ndarray:
+    if "img_no_norm" in pred:
+        img = pred["img_no_norm"][0].detach().float().cpu().numpy()
+        if img.max() <= 1.5:
+            img = img * 255.0
+        return np.clip(img, 0, 255).astype(np.uint8)
+    if fallback_rgb is not None:
+        return fallback_rgb.astype(np.uint8)
+    h, w = _prediction_depth_z(pred).shape
+    return np.full((h, w, 3), 255, dtype=np.uint8)
+
+
+def _prediction_mask(pred: Dict[str, torch.Tensor], shape_hw: Tuple[int, int]) -> np.ndarray:
+    h, w = shape_hw
+    if "mask" in pred:
+        mask = pred["mask"][0]
+        if mask.ndim == 3 and mask.shape[-1] == 1:
+            mask = mask[..., 0]
+        return mask.detach().cpu().numpy().astype(bool)
+    return np.ones((h, w), dtype=bool)
+
+
+def _write_ply_binary(path: Path, xyz: np.ndarray, rgb: Optional[np.ndarray] = None) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    xyz = np.asarray(xyz, dtype=np.float32)
+    if xyz.ndim != 2 or xyz.shape[1] != 3:
+        raise ValueError(f"xyz must be [N,3], got {xyz.shape}")
+
+    if rgb is None:
+        rgb = np.full((xyz.shape[0], 3), 255, dtype=np.uint8)
+    else:
+        rgb = np.asarray(rgb)
+        if rgb.max() <= 1.5:
+            rgb = rgb * 255.0
+        rgb = np.clip(rgb, 0, 255).astype(np.uint8)
+        if rgb.ndim != 2 or rgb.shape[1] != 3:
+            raise ValueError(f"rgb must be [N,3], got {rgb.shape}")
+        if rgb.shape[0] != xyz.shape[0]:
+            raise ValueError(f"xyz/rgb row mismatch: {xyz.shape[0]} vs {rgb.shape[0]}")
+
+    vertex = np.empty(
+        xyz.shape[0],
+        dtype=[("x", "<f4"), ("y", "<f4"), ("z", "<f4"), ("red", "u1"), ("green", "u1"), ("blue", "u1")],
+    )
+    vertex["x"] = xyz[:, 0]
+    vertex["y"] = xyz[:, 1]
+    vertex["z"] = xyz[:, 2]
+    vertex["red"] = rgb[:, 0]
+    vertex["green"] = rgb[:, 1]
+    vertex["blue"] = rgb[:, 2]
+
+    header = (
+        "ply\n"
+        "format binary_little_endian 1.0\n"
+        f"element vertex {xyz.shape[0]}\n"
+        "property float x\n"
+        "property float y\n"
+        "property float z\n"
+        "property uchar red\n"
+        "property uchar green\n"
+        "property uchar blue\n"
+        "end_header\n"
+    )
+    with open(path, "wb") as f:
+        f.write(header.encode("ascii"))
+        vertex.tofile(f)
+
+
 def save_depth_maps(
     predictions: List[Dict[str, torch.Tensor]],
     output_dir: Path,
     prefix: str,
+    fallback_rgbs: Optional[List[np.ndarray]] = None,
 ) -> None:
+    """
+    Save depth_z visualizations/raw arrays and fused/per-view PLY point clouds.
+    """
     ensure_dir(output_dir)
+    merged_xyz = []
+    merged_rgb = []
+
     for idx, pred in enumerate(predictions):
-        depth = pred["depth_along_ray"][0, ..., 0].detach().float().cpu().numpy()
-        conf = pred["conf"][0].detach().float().cpu().numpy()
-
-        def normalize(x):
-            mask = np.isfinite(x)
-            if not np.any(mask):
-                return np.zeros_like(x)
-            vals = x[mask]
-            lo, hi = np.percentile(vals, 2), np.percentile(vals, 98)
-            x = np.clip((x - lo) / (hi - lo + 1e-6), 0, 1)
-            return x
+        depth_z = _prediction_depth_z(pred)
+        conf = pred["conf"][0].detach().float().cpu().numpy() if "conf" in pred else np.ones_like(depth_z)
 
         plt.figure(figsize=(6, 5))
-        plt.imshow(normalize(depth))
+        plt.imshow(_normalize_for_vis(depth_z))
         plt.colorbar()
-        plt.title(f"{prefix} depth view {idx}")
+        plt.title(f"{prefix} depth_z view {idx}")
         plt.tight_layout()
-        plt.savefig(output_dir / f"{prefix}_depth_view{idx:02d}.png", dpi=180)
+        plt.savefig(output_dir / f"{prefix}_depthz_view{idx:02d}.png", dpi=180)
         plt.close()
+        np.save(output_dir / f"{prefix}_depthz_view{idx:02d}.npy", depth_z.astype(np.float32))
 
         plt.figure(figsize=(6, 5))
-        plt.imshow(normalize(conf))
+        plt.imshow(_normalize_for_vis(conf))
         plt.colorbar()
         plt.title(f"{prefix} conf view {idx}")
         plt.tight_layout()
         plt.savefig(output_dir / f"{prefix}_conf_view{idx:02d}.png", dpi=180)
         plt.close()
+        np.save(output_dir / f"{prefix}_conf_view{idx:02d}.npy", conf.astype(np.float32))
+
+        pts3d_world = None
+        if "pts3d" in pred:
+            pts3d_world = pred["pts3d"][0].detach().float().cpu().numpy()
+        elif "pts3d_cam" in pred and "camera_poses" in pred:
+            pts3d_cam = pred["pts3d_cam"][0].detach().float().cpu().numpy()
+            pose = pred["camera_poses"][0].detach().float().cpu().numpy()
+            pts_h = np.concatenate([pts3d_cam, np.ones_like(pts3d_cam[..., :1])], axis=-1)
+            pts3d_world = np.einsum("ij,hwj->hwi", pose, pts_h)[..., :3]
+
+        if pts3d_world is not None:
+            rgb = _prediction_rgb(pred, fallback_rgbs[idx] if fallback_rgbs is not None and idx < len(fallback_rgbs) else None)
+            valid_mask = _prediction_mask(pred, depth_z.shape)
+            valid_mask &= np.isfinite(depth_z)
+            valid_mask &= np.isfinite(pts3d_world).all(axis=-1)
+            valid_mask &= depth_z > 0
+
+            xyz = pts3d_world[valid_mask].reshape(-1, 3)
+            colors = rgb[valid_mask].reshape(-1, 3)
+            if xyz.shape[0] > 0:
+                _write_ply_binary(output_dir / f"{prefix}_points_view{idx:02d}.ply", xyz, colors)
+                merged_xyz.append(xyz)
+                merged_rgb.append(colors)
+
+    if merged_xyz:
+        merged_xyz = np.concatenate(merged_xyz, axis=0)
+        merged_rgb = np.concatenate(merged_rgb, axis=0)
+        _write_ply_binary(output_dir / f"{prefix}_points_merged.ply", merged_xyz, merged_rgb)
 
 
 # -----------------------------------------------------------------------------
@@ -1102,15 +1454,17 @@ def build_argparser() -> argparse.ArgumentParser:
     parser.add_argument("--min_views_per_track", type=int, default=2)
     parser.add_argument("--max_tracks_for_bias", type=int, default=1500)
 
-    parser.add_argument("--capture_layers", type=str, default="1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22")
-    parser.add_argument("--inject_layers", type=str, default="middle", help="'middle' or comma separated global layer ids")
+    parser.add_argument("--capture_layers", type=str, default="10,11,12,13,14,15,16")
+    parser.add_argument("--inject_layers", type=str, default="14", help="'middle' or comma separated global layer ids")
     parser.add_argument("--bias_lambda", type=float, default=2.0)
     parser.add_argument("--sigma_q", type=float, default=0.8, help="Gaussian spread in query patch grid")
     parser.add_argument("--sigma_k", type=float, default=0.8, help="Gaussian spread in key patch grid")
     parser.add_argument("--head_gains", type=str, default="", help="Comma-separated per-head gains; empty -> all ones")
+    parser.add_argument("--skip_global_layers", type=str, default="", help="Comma-separated global layer ids to skip entirely during forward")
 
+    # Keep the user's original CLI semantics.
     parser.add_argument("--run_baseline", action="store_false", help="Run baseline inference with attention capture")
-    parser.add_argument("--run_injected", action="store_false", help="Run inference with tie-point prior injection")
+    parser.add_argument("--run_injected", action="store_true", help="Run inference with tie-point prior injection")
     parser.add_argument("--save_depth", action="store_false", help="Save depth/confidence visualizations")
     parser.add_argument("--save_matches", action="store_false", help="Save pairwise match visualizations")
     parser.add_argument("--pair_a", type=int, default=0, help="Query view index for patch-match visualization")
@@ -1136,6 +1490,8 @@ def main():
     match_dir = ensure_dir(viz_dir / "classical_matches")
     attn_dir = ensure_dir(viz_dir / "attention")
     inj_attn_dir = ensure_dir(viz_dir / "attention_injected")
+    bias_dir = ensure_dir(viz_dir / "bias")
+    compare_dir = ensure_dir(viz_dir / "compare")
 
     setup_offline_torch_hub(args.torch_hub_dir, args.local_dino_repo)
 
@@ -1201,15 +1557,30 @@ def main():
                 f"--head_gains length must equal num_heads={num_heads}, got {len(head_gains)}"
             )
 
+    skip_layers_spec = parse_int_list(args.skip_global_layers)
+    skip_layers = choose_capture_layers(num_global_layers, skip_layers_spec)
+
+    effective_capture_layers = [x for x in capture_layers if x not in skip_layers]
+    effective_inject_layers = [x for x in inject_layers if x not in skip_layers]
+
+    skipped_from_capture = sorted(set(capture_layers) & set(skip_layers))
+    skipped_from_inject = sorted(set(inject_layers) & set(skip_layers))
+
     print(f"[Info] capture_layers={capture_layers}")
     print(f"[Info] inject_layers={inject_layers}")
+    print(f"[Info] skip_global_layers={skip_layers}")
+    if skipped_from_capture:
+        print(f"[Warn] These capture layers are skipped and will not be visualized: {skipped_from_capture}")
+    if skipped_from_inject:
+        print(f"[Warn] These inject layers are skipped and will not receive bias: {skipped_from_inject}")
 
     controller = VGGTAttentionController(
         model_wrapper=model,
-        capture_layers=capture_layers,
-        inject_layers=inject_layers,
+        capture_layers=effective_capture_layers,
+        inject_layers=effective_inject_layers,
         head_gains=head_gains,
         layer_lambda=args.bias_lambda,
+        skip_layers=skip_layers,
     )
 
     # ------------------------------------------------------------------
@@ -1280,6 +1651,9 @@ def main():
     # Step 2: baseline inference + attention capture
     # ------------------------------------------------------------------
     baseline_predictions = None
+    baseline_attn_cache: Dict[int, torch.Tensor] = {}
+    baseline_logits_cache: Dict[int, torch.Tensor] = {}
+
     if args.run_baseline or (not args.run_baseline and not args.run_injected):
         print("[Step] Running baseline inference...")
         controller.clear()
@@ -1289,8 +1663,11 @@ def main():
         with torch.no_grad():
             baseline_predictions = model(views)
 
+        baseline_attn_cache = {k: v.clone() for k, v in controller.saved_attn.items()}
+        baseline_logits_cache = {k: v.clone() for k, v in controller.saved_logits.items()}
+
         if args.save_depth:
-            save_depth_maps(baseline_predictions, viz_dir / "baseline_depth", "baseline")
+            save_depth_maps(baseline_predictions, viz_dir / "baseline_depth", "baseline", fallback_rgbs=resized_rgbs)
 
         for layer_idx in capture_layers:
             attn = controller.get_attention(layer_idx)
@@ -1350,6 +1727,45 @@ def main():
         )
         save_json(output_dir / "bias_metadata.json", bias_meta)
 
+        # ----------------------------------------------------------
+        # Visualize the bias itself
+        # ----------------------------------------------------------
+        save_bias_view_heatmap(
+            bias=base_bias,
+            output_path=bias_dir / "bias_view_heatmap.png",
+            num_views=num_views,
+            per_view_tokens=per_view_tokens,
+            patch_start_idx=patch_start_idx,
+            title="Tie-point bias view-view heatmap",
+        )
+
+        if 0 <= args.pair_a < num_views and 0 <= args.pair_b < num_views and args.pair_a != args.pair_b:
+            save_bias_pair_matrix(
+                bias=base_bias,
+                output_path=bias_dir / f"bias_pair_{args.pair_a}_{args.pair_b}_matrix.png",
+                view_a=args.pair_a,
+                view_b=args.pair_b,
+                per_view_tokens=per_view_tokens,
+                patch_start_idx=patch_start_idx,
+                title=f"Bias block view {args.pair_a} -> view {args.pair_b}",
+                save_per_head=True,
+            )
+            save_bias_patch_match_viz(
+                bias=base_bias,
+                img_a=resized_rgbs[args.pair_a],
+                img_b=resized_rgbs[args.pair_b],
+                output_path=bias_dir / f"bias_pair_{args.pair_a}_{args.pair_b}.png",
+                view_a=args.pair_a,
+                view_b=args.pair_b,
+                per_view_tokens=per_view_tokens,
+                patch_start_idx=patch_start_idx,
+                patch_size=patch_size,
+                grid_w=grid_w,
+                topk=args.topk_patch_matches,
+                title=f"Bias patch matches view {args.pair_a} -> view {args.pair_b}",
+                save_per_head=True,
+            )
+
         per_layer_lambdas = triangular_layer_lambda(inject_layers, args.bias_lambda)
         print(f"[Info] per_layer_lambdas={per_layer_lambdas}")
 
@@ -1367,7 +1783,7 @@ def main():
             injected_predictions = model(views)
 
         if args.save_depth:
-            save_depth_maps(injected_predictions, viz_dir / "injected_depth", "injected")
+            save_depth_maps(injected_predictions, viz_dir / "injected_depth", "injected", fallback_rgbs=resized_rgbs)
 
         for layer_idx in capture_layers:
             attn = controller.get_attention(layer_idx)
@@ -1408,6 +1824,54 @@ def main():
                     save_per_head=True,
                 )
 
+        # ----------------------------------------------------------
+        # Compare baseline vs injected: did bias actually change logits/attn?
+        # ----------------------------------------------------------
+        if baseline_attn_cache and baseline_logits_cache:
+            for layer_idx in capture_layers:
+                if layer_idx not in baseline_attn_cache:
+                    continue
+                if layer_idx not in controller.saved_attn:
+                    continue
+                if layer_idx not in baseline_logits_cache:
+                    continue
+                if layer_idx not in controller.saved_logits:
+                    continue
+
+                inj_attn = controller.saved_attn[layer_idx]
+                inj_logits = controller.saved_logits[layer_idx]
+                base_attn = baseline_attn_cache[layer_idx]
+                base_logits = baseline_logits_cache[layer_idx]
+
+                if 0 <= args.pair_a < num_views and 0 <= args.pair_b < num_views and args.pair_a != args.pair_b:
+                    save_delta_pair_matrix(
+                        tensor_after=inj_logits,
+                        tensor_before=base_logits,
+                        output_path=compare_dir / f"layer_{layer_idx:02d}_pair_{args.pair_a}_{args.pair_b}_delta_logits.png",
+                        view_a=args.pair_a,
+                        view_b=args.pair_b,
+                        per_view_tokens=per_view_tokens,
+                        patch_start_idx=patch_start_idx,
+                        title=f"Layer {layer_idx}: injected - baseline logits",
+                        save_per_head=True,
+                        is_attention=False,
+                    )
+
+                    save_delta_pair_matrix(
+                        tensor_after=inj_attn,
+                        tensor_before=base_attn,
+                        output_path=compare_dir / f"layer_{layer_idx:02d}_pair_{args.pair_a}_{args.pair_b}_delta_attn.png",
+                        view_a=args.pair_a,
+                        view_b=args.pair_b,
+                        per_view_tokens=per_view_tokens,
+                        patch_start_idx=patch_start_idx,
+                        title=f"Layer {layer_idx}: injected - baseline attention",
+                        save_per_head=True,
+                        is_attention=True,
+                    )
+        else:
+            print("[Warn] Baseline cache is empty; skipping delta_logits / delta_attn comparison.")
+
     summary = {
         "num_views": num_views,
         "image_size": [H, W],
@@ -1417,6 +1881,9 @@ def main():
         "num_tracks": len(tracks),
         "capture_layers": capture_layers,
         "inject_layers": inject_layers,
+        "skip_global_layers": skip_layers,
+        "effective_capture_layers": effective_capture_layers,
+        "effective_inject_layers": effective_inject_layers,
         "pair_a": args.pair_a,
         "pair_b": args.pair_b,
         "matcher": detector_name,
@@ -1428,4 +1895,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
