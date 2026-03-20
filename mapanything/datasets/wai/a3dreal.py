@@ -253,12 +253,12 @@ def get_parser():
 
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "-rd", "--root_dir", default="/home/csuzhang/disk/a3dscenes/A3D-Real", type=str
+        "-rd", "--root_dir", default="../../dataset/data/A3D-Real", type=str
     )
     parser.add_argument(
         "-dmd",
         "--dataset_metadata_dir",
-        default="/home/csuzhang/disk/a3dscenes/metadata",
+        default="../../dataset/data/metadata",
         type=str,
     )
     parser.add_argument(

@@ -6,12 +6,16 @@
 """
 Utils for Metrics
 
-- Pose metrics (ATE, AUC@K)
-- Dense metrics (rel abs, inlier ratio, ray-dir angular err)
-- Absolute metrics with per-image alignment:
-    * pointmap: per-view Sim3 alignment then MAE/RMSE
-    * depth (z): per-view affine alignment (a*z+b) then MAE/RMSE
-- Fused pointcloud metrics (Sim3 + ICP + Chamfer + inlier ratio)
+This version reorganizes metrics into three groups:
+1. Relative metrics on normalized pointmaps / normalized poses.
+2. System-level absolute metrics after ONE global Sim(3) alignment.
+3. Per-view depth absolute metrics with sequence-level scale-only alignment.
+
+Compared with the earlier version:
+- removed per-view Sim(3) for absolute pointmap metrics;
+- removed per-view affine depth fitting;
+- kept fused-PC metrics in the globally aligned world frame;
+- kept optional ICP only as a final tiny refinement for fused pointclouds (default can be 0).
 """
 
 from __future__ import annotations
@@ -49,7 +53,7 @@ def thresh_inliers(gt, pred, thresh=1.03, mask=None, output_scaling_factor=1.0):
     gt_norm = np.linalg.norm(gt, axis=-1)
     pred_norm = np.linalg.norm(pred, axis=-1)
 
-    gt_norm_valid = (gt_norm) > 0
+    gt_norm_valid = gt_norm > 0
     combined_mask = (mask & gt_norm_valid) if mask is not None else gt_norm_valid
 
     with np.errstate(divide="ignore", invalid="ignore"):
@@ -69,7 +73,7 @@ def m_rel_ae(gt, pred, mask=None, output_scaling_factor=1.0):
     error_norm = np.linalg.norm(pred - gt, axis=-1)
     gt_norm = np.linalg.norm(gt, axis=-1)
 
-    gt_norm_valid = (gt_norm) > 0
+    gt_norm_valid = gt_norm > 0
     combined_mask = (mask & gt_norm_valid) if mask is not None else gt_norm_valid
 
     with np.errstate(divide="ignore", invalid="ignore"):
@@ -79,6 +83,81 @@ def m_rel_ae(gt, pred, mask=None, output_scaling_factor=1.0):
     out = out * output_scaling_factor
     out = out if valid else np.nan
     return out
+
+
+# ============================================================
+# Depth metrics with sequence-level scale-only alignment
+# ============================================================
+
+def depth_abs_rel(gt, pred, mask):
+    valid = mask & np.isfinite(gt) & np.isfinite(pred) & (gt > 1e-12) & (pred > 1e-12)
+    if valid.sum() == 0:
+        return np.nan
+    return float(np.mean(np.abs(pred[valid] - gt[valid]) / gt[valid]))
+
+
+def depth_rmse(gt, pred, mask):
+    valid = mask & np.isfinite(gt) & np.isfinite(pred)
+    if valid.sum() == 0:
+        return np.nan
+    err = pred[valid] - gt[valid]
+    return float(np.sqrt(np.mean(err * err)))
+
+
+def depth_mae(gt, pred, mask):
+    valid = mask & np.isfinite(gt) & np.isfinite(pred)
+    if valid.sum() == 0:
+        return np.nan
+    return float(np.mean(np.abs(pred[valid] - gt[valid])))
+
+
+def depth_delta(gt, pred, mask, thresh=1.25):
+    valid = mask & np.isfinite(gt) & np.isfinite(pred) & (gt > 1e-12) & (pred > 1e-12)
+    if valid.sum() == 0:
+        return np.nan
+    ratio = np.maximum(gt[valid] / pred[valid], pred[valid] / gt[valid])
+    return float(np.mean(ratio < thresh))
+
+
+def solve_sequence_depth_scale(gt_depth_list, pr_depth_list, mask_list, max_samples_total=200000, eps=1e-12):
+    """
+    Solve one scale s for a multi-view set so that:
+        pred_depth_aligned = s * pred_depth
+    using robust median of gt/pred over all valid pixels from the set.
+    """
+    ratios = []
+    total_valid = sum(int(m.sum()) for m in mask_list)
+    if total_valid <= 0:
+        return 1.0
+
+    for gt, pr, m in zip(gt_depth_list, pr_depth_list, mask_list):
+        valid = m & np.isfinite(gt) & np.isfinite(pr) & (gt > eps) & (pr > eps)
+        if valid.sum() == 0:
+            continue
+
+        gt_v = gt[valid].reshape(-1)
+        pr_v = pr[valid].reshape(-1)
+
+        k = int(max_samples_total * (gt_v.shape[0] / total_valid))
+        k = min(max(k, 1), gt_v.shape[0])
+        if gt_v.shape[0] > k:
+            sel = np.random.choice(gt_v.shape[0], k, replace=False)
+            gt_v = gt_v[sel]
+            pr_v = pr_v[sel]
+
+        ratios.append(gt_v / np.maximum(pr_v, eps))
+
+    if len(ratios) == 0:
+        return 1.0
+
+    ratios = np.concatenate(ratios, axis=0)
+    if ratios.size == 0:
+        return 1.0
+
+    s = float(np.median(ratios))
+    if not np.isfinite(s) or s <= 0:
+        s = 1.0
+    return s
 
 
 # ============================================================
@@ -180,7 +259,7 @@ def mat_to_quat(matrix: torch.Tensor) -> torch.Tensor:
     quat_candidates = quat_by_rijk / (2.0 * q_abs[..., None].max(flr))
 
     out = quat_candidates[F.one_hot(q_abs.argmax(dim=-1), num_classes=4) > 0.5, :].reshape(batch_dim + (4,))
-    out = out[..., [1, 2, 3, 0]]  # rijk -> ijkr
+    out = out[..., [1, 2, 3, 0]]
     out = standardize_quaternion(out)
     return out
 
@@ -307,40 +386,26 @@ def voxel_downsample_np(points, colors_u8, voxel_size):
 
 
 @torch.no_grad()
-def _nn_distance_torch(
-    src: torch.Tensor,
-    dst: torch.Tensor,
-    src_chunk: int = 2048,
-    dst_chunk: int = 2048,
-):
-    """
-    Memory-safe NN search using block-wise cdist.
-    Complexity: O(Ns*Nd) compute, but peak memory O(src_chunk*dst_chunk).
-    Returns:
-      best_d: (Ns,)
-      best_j: (Ns,) indices into dst
-    """
+def _nn_distance_torch(src: torch.Tensor, dst: torch.Tensor, src_chunk: int = 2048, dst_chunk: int = 2048):
     Ns = src.shape[0]
     device = src.device
     dtype = src.dtype
 
-    # use +inf init
     best_d = torch.full((Ns,), float("inf"), device=device, dtype=dtype)
     best_j = torch.zeros((Ns,), device=device, dtype=torch.long)
 
     Nd = dst.shape[0]
     for i in range(0, Ns, src_chunk):
-        s = src[i : i + src_chunk]  # (cs,3)
+        s = src[i : i + src_chunk]
         cs = s.shape[0]
 
         bd = torch.full((cs,), float("inf"), device=device, dtype=dtype)
         bj = torch.zeros((cs,), device=device, dtype=torch.long)
 
         for j0 in range(0, Nd, dst_chunk):
-            dblk = dst[j0 : j0 + dst_chunk]  # (cd,3)
-            # (cs,cd) but cd is small => low peak memory
+            dblk = dst[j0 : j0 + dst_chunk]
             d = torch.cdist(s, dblk, p=2)
-            md, mj = torch.min(d, dim=1)  # (cs,)
+            md, mj = torch.min(d, dim=1)
 
             better = md < bd
             if better.any():
@@ -378,6 +443,7 @@ def kabsch_se3_torch(A: torch.Tensor, B: torch.Tensor, eps: float = 1e-9):
     t = muB - (R @ muA)
     return R, t
 
+
 @torch.no_grad()
 def icp_se3_torch(
     src: torch.Tensor,
@@ -397,7 +463,6 @@ def icp_se3_torch(
 
     X = src
     for _ in range(iters):
-        # subsample src for correspondences
         if X.shape[0] > max_src_corr:
             idx = torch.randperm(X.shape[0], device=device)[:max_src_corr]
             Xc = X[idx]
@@ -434,6 +499,7 @@ def icp_se3_torch(
 
     return R_tot, t_tot, X
 
+
 @torch.no_grad()
 def chamfer_inlier_torch(
     pred: torch.Tensor,
@@ -456,85 +522,10 @@ def chamfer_inlier_torch(
     inlier_ratio = (d_pg < inlier_dist).float().mean().item()
     return chamfer_l1, chamfer_rmse, inlier_ratio
 
+
 # ============================================================
-# Per-image alignment helpers (Sim3 for points, affine for depth)
+# Global Sim(3) from correspondences
 # ============================================================
-
-def apply_sim3_to_points_np(points_hw3: np.ndarray, s: torch.Tensor, R: torch.Tensor, t: torch.Tensor) -> np.ndarray:
-    P = torch.from_numpy(points_hw3.reshape(-1, 3)).to(device=R.device, dtype=torch.float32)
-    P_al = (s * (R @ P.t())).t() + t[None, :]
-    return P_al.detach().cpu().numpy().reshape(points_hw3.shape)
-
-
-def fit_affine_1d_np(pred: np.ndarray, gt: np.ndarray, mask: np.ndarray):
-    x = pred[mask].reshape(-1)
-    y = gt[mask].reshape(-1)
-    if x.size < 10:
-        return 1.0, 0.0
-    A = np.stack([x, np.ones_like(x)], axis=1)
-    sol, *_ = np.linalg.lstsq(A, y, rcond=None)
-    a, b = float(sol[0]), float(sol[1])
-    if not np.isfinite(a): a = 1.0
-    if not np.isfinite(b): b = 0.0
-    return a, b
-
-
-@torch.no_grad()
-def gather_correspondences_from_pointmaps(
-    pr_pts_list_abs,
-    gt_pts_list_abs,
-    masks_list,
-    device,
-    dtype=torch.float32,
-    max_samples_total: int = 1000,
-):
-    pr_all, gt_all = [], []
-    valid_counts = [int(m.astype(bool).sum()) for m in masks_list]
-    total_valid = sum(valid_counts)
-    if total_valid <= 0:
-        return None, None
-
-    for pr_map, gt_map, m, cnt in zip(pr_pts_list_abs, gt_pts_list_abs, masks_list, valid_counts):
-        if cnt <= 0:
-            continue
-
-        if not torch.is_tensor(pr_map):
-            pr_map_t = torch.from_numpy(pr_map).to(device=device, dtype=dtype)
-        else:
-            pr_map_t = pr_map.to(device=device, dtype=dtype)
-
-        if not torch.is_tensor(gt_map):
-            gt_map_t = torch.from_numpy(gt_map).to(device=device, dtype=dtype)
-        else:
-            gt_map_t = gt_map.to(device=device, dtype=dtype)
-
-        m_bool = m.astype(bool)
-        ij = np.argwhere(m_bool)
-        if ij.shape[0] == 0:
-            continue
-
-        k = int(max_samples_total * (cnt / total_valid))
-        k = min(k, ij.shape[0])
-        sel = np.random.choice(ij.shape[0], k, replace=False)
-        uv = ij[sel]
-
-        u = torch.from_numpy(uv[:, 0]).to(device=device, dtype=torch.long)
-        v = torch.from_numpy(uv[:, 1]).to(device=device, dtype=torch.long)
-
-        pr = pr_map_t[u, v]
-        gt = gt_map_t[u, v]
-
-        good = torch.isfinite(pr).all(dim=1) & torch.isfinite(gt).all(dim=1)
-        if good.sum() > 0:
-            pr_all.append(pr[good])
-            gt_all.append(gt[good])
-
-    if len(pr_all) == 0:
-        return None, None
-    pr_corr = torch.cat(pr_all, dim=0)
-    gt_corr = torch.cat(gt_all, dim=0)
-    return pr_corr, gt_corr
-
 
 @torch.no_grad()
 def umeyama_sim3_torch(A: torch.Tensor, B: torch.Tensor, eps: float = 1e-9):
@@ -599,58 +590,8 @@ def sim3_from_correspondences_robust(
 
 
 # ============================================================
-# Global scale helper (used by get_all_info... in benchmark)
+# Misc torch helpers
 # ============================================================
-
-def global_scale_from_pointmaps(
-    gt_pts_list,
-    pr_pts_list,
-    masks_list,
-    max_samples_per_view=20000,
-    eps=1e-8,
-):
-    ratios = []
-    for gt, pr, m in zip(gt_pts_list, pr_pts_list, masks_list):
-        gt = gt.detach().cpu().numpy()
-        pr = pr.detach().cpu().numpy()
-        m = m.detach().cpu().numpy().astype(bool)
-
-        if gt.ndim == 3:
-            gt_v = gt[m].reshape(-1, 3)
-            pr_v = pr[m].reshape(-1, 3)
-        else:
-            gt_v = gt.reshape(-1, 3)
-            pr_v = pr.reshape(-1, 3)
-
-        if gt_v.shape[0] == 0:
-            continue
-
-        if gt_v.shape[0] > max_samples_per_view:
-            idx = np.random.choice(gt_v.shape[0], max_samples_per_view, replace=False)
-            gt_v = gt_v[idx]
-            pr_v = pr_v[idx]
-
-        gt_n = np.linalg.norm(gt_v, axis=1)
-        pr_n = np.linalg.norm(pr_v, axis=1)
-
-        valid = (gt_n > eps) & (pr_n > eps) & np.isfinite(gt_n) & np.isfinite(pr_n)
-        if valid.sum() == 0:
-            continue
-
-        r = gt_n[valid] / pr_n[valid]
-        ratios.append(r)
-
-    if len(ratios) == 0:
-        return 1.0
-    ratios = np.concatenate(ratios, axis=0)
-    if ratios.size == 0:
-        return 1.0
-
-    s = float(np.median(ratios))
-    if not np.isfinite(s) or s <= 0:
-        s = 1.0
-    return s
-
 
 @torch.no_grad()
 def random_sample_points_torch(x: torch.Tensor, max_n: int) -> torch.Tensor:
@@ -659,8 +600,9 @@ def random_sample_points_torch(x: torch.Tensor, max_n: int) -> torch.Tensor:
     idx = torch.randperm(x.shape[0], device=x.device)[:max_n]
     return x[idx]
 
+
 # ============================================================
-# High-level: compute all metrics for one multi-view set
+# High-level metrics for one set
 # ============================================================
 
 @dataclass
@@ -680,28 +622,26 @@ def compute_set_metrics(
     pr_info: Dict[str, Any],
     valid_masks: List[torch.Tensor],
     gt_info_abs: Dict[str, Any],
-    pr_info_abs: Dict[str, Any],  # absolute pred already scaled (from get_all_info...)
+    pr_info_abs: Dict[str, Any],
     scale_factors: Dict[str, torch.Tensor],
     device: torch.device,
-    # fused PC config
     voxel: float = 0.1,
-    icp_iters: int = 20,
+    icp_iters: int = 0,
     trim_ratio: float = 0.8,
-    sim3_trim_ratio: float = 0.8,
-    sim3_iters: int = 2,
-    max_samples_per_view_abs: int = 1000,
     return_fused_debug: bool = False,
     compute_abs_metrics: bool = False,
 ) -> Tuple[Dict[str, float], Optional[FusedPCDebug]]:
     """
-    Returns:
-      metrics: dict of scalar metrics for this multi-view set (already averaged across views where applicable)
-      fused_debug: optional downsampled pcs to write ply outside
-    """
+    Returns metrics for one multi-view set.
 
+    Metric groups:
+    - relative metrics on normalized geometry;
+    - system-level absolute metrics in globally aligned world frame;
+    - per-view depth absolute metrics with set-level scale-only alignment.
+    """
     n_views = len(batch_views)
 
-    # --- per-view accumulators (always computed) ---
+    # ---------------- Relative metrics ----------------
     pointmaps_abs_rel_list = []
     pointmaps_inlier_103_list = []
     z_abs_rel_list = []
@@ -710,129 +650,87 @@ def compute_set_metrics(
     gt_poses_curr_set = []
     pr_poses_curr_set = []
 
-    # --- collect abs-domain assets either for abs metrics or for fused ply saving ---
-    need_abs_data = compute_abs_metrics or return_fused_debug
+    # ---------------- System-level absolute metrics ----------------
+    global_point_mae_list = []
+    global_point_rmse_list = []
+    gt_poses_abs_curr_set = []
+    pr_poses_abs_curr_set = []
 
-    if compute_abs_metrics:
-        abs_point_mae_list = []
-        abs_point_rmse_list = []
-        abs_z_mae_list = []
-        abs_z_rmse_list = []
-    else:
-        abs_point_mae_list = []
-        abs_point_rmse_list = []
-        abs_z_mae_list = []
-        abs_z_rmse_list = []
+    # ---------------- Depth absolute metrics with sequence-level scale ----------------
+    gt_depth_abs_list = []
+    pr_depth_abs_list = []
+    depth_mask_list = []
 
-    if need_abs_data:
-        rgb_list_u8 = []
-        gt_pts_list_abs = []
-        pr_pts_list_abs = []
-        masks_list = []
-    else:
-        rgb_list_u8 = []
-        gt_pts_list_abs = []
-        pr_pts_list_abs = []
-        masks_list = []
+    # ---------------- Fused-PC assets ----------------
+    rgb_list_u8 = []
+    gt_pts_list_abs = []
+    pr_pts_list_abs = []
+    masks_list = []
 
     for view_idx in range(n_views):
         valid_mask = valid_masks[view_idx][batch_idx].cpu().numpy().astype(bool)
 
-        # -------- Relative dense metrics (always) --------
-        pm_abs_rel = m_rel_ae(
-            gt=gt_info["pts3d"][view_idx][batch_idx].numpy(),
-            pred=pr_info["pts3d"][view_idx][batch_idx].numpy(),
-            mask=valid_mask,
+        # Relative metrics
+        gt_pts_rel = gt_info["pts3d"][view_idx][batch_idx].numpy()
+        pr_pts_rel = pr_info["pts3d"][view_idx][batch_idx].numpy()
+        gt_z_rel = gt_info["z_depths"][view_idx][batch_idx].numpy()
+        pr_z_rel = pr_info["z_depths"][view_idx][batch_idx].numpy()
+
+        pointmaps_abs_rel_list.append(float(m_rel_ae(gt=gt_pts_rel, pred=pr_pts_rel, mask=valid_mask)))
+        pointmaps_inlier_103_list.append(
+            float(thresh_inliers(gt=gt_pts_rel, pred=pr_pts_rel, mask=valid_mask, thresh=1.03))
         )
-        pm_inlier = thresh_inliers(
-            gt=gt_info["pts3d"][view_idx][batch_idx].numpy(),
-            pred=pr_info["pts3d"][view_idx][batch_idx].numpy(),
-            mask=valid_mask,
-            thresh=1.03,
-        )
-        z_abs_rel = m_rel_ae(
-            gt=gt_info["z_depths"][view_idx][batch_idx].numpy(),
-            pred=pr_info["z_depths"][view_idx][batch_idx].numpy(),
-            mask=valid_mask,
-        )
-        z_inlier = thresh_inliers(
-            gt=gt_info["z_depths"][view_idx][batch_idx].numpy(),
-            pred=pr_info["z_depths"][view_idx][batch_idx].numpy(),
-            mask=valid_mask,
-            thresh=1.03,
+        z_abs_rel_list.append(float(m_rel_ae(gt=gt_z_rel, pred=pr_z_rel, mask=valid_mask)))
+        z_inlier_103_list.append(
+            float(thresh_inliers(gt=gt_z_rel, pred=pr_z_rel, mask=valid_mask, thresh=1.03))
         )
 
-        pointmaps_abs_rel_list.append(float(pm_abs_rel))
-        pointmaps_inlier_103_list.append(float(pm_inlier))
-        z_abs_rel_list.append(float(z_abs_rel))
-        z_inlier_103_list.append(float(z_inlier))
-
-        # -------- Ray direction angular error (always) --------
         ray_dirs_l2 = torch.norm(
             gt_info["ray_directions"][view_idx][batch_idx] - pr_info["ray_directions"][view_idx][batch_idx],
             dim=-1,
         )
-        ray_err_deg = l2_distance_of_unit_ray_directions_to_angular_error(ray_dirs_l2).mean().item()
-        ray_err_deg_list.append(float(ray_err_deg))
+        ray_err_deg_list.append(float(l2_distance_of_unit_ray_directions_to_angular_error(ray_dirs_l2).mean().item()))
 
-        # -------- Poses (for ATE / AUC) always --------
         gt_poses_curr_set.append(gt_info["poses"][view_idx][batch_idx])
         pr_poses_curr_set.append(pr_info["poses"][view_idx][batch_idx])
 
-        # -------- Collect abs-domain data if needed --------
-        if need_abs_data:
-            gt_pts_abs_v = gt_info_abs["pts3d"][view_idx][batch_idx].cpu().numpy()   # (H,W,3)
-            pr_pts_abs_v = pr_info_abs["pts3d"][view_idx][batch_idx].cpu().numpy()   # (H,W,3)
+        # Absolute pointmap / pose assets in globally aligned world frame
+        gt_pts_abs_v = gt_info_abs["pts3d"][view_idx][batch_idx].cpu().numpy()
+        pr_pts_abs_v = pr_info_abs["pts3d"][view_idx][batch_idx].cpu().numpy()
 
+        if compute_abs_metrics:
+            e3d = np.linalg.norm(pr_pts_abs_v - gt_pts_abs_v, axis=-1)
+            e3d_valid = e3d[valid_mask]
+            if e3d_valid.size == 0:
+                global_point_mae_list.append(np.nan)
+                global_point_rmse_list.append(np.nan)
+            else:
+                global_point_mae_list.append(float(np.mean(e3d_valid)))
+                global_point_rmse_list.append(float(np.sqrt(np.mean(e3d_valid ** 2))))
+
+        gt_poses_abs_curr_set.append(gt_info_abs["poses"][view_idx][batch_idx])
+        pr_poses_abs_curr_set.append(pr_info_abs["poses"][view_idx][batch_idx])
+
+        # Depth absolute assets in camera frame (already globally scale-adjusted by the world Sim3 scale,
+        # but we still solve one depth-only scale for the set to evaluate single-frame depth quality).
+        gt_z_abs_v = gt_info_abs["z_depths"][view_idx][batch_idx].cpu().numpy()[..., 0]
+        pr_z_abs_v = pr_info_abs["z_depths"][view_idx][batch_idx].cpu().numpy()[..., 0]
+        gt_depth_abs_list.append(gt_z_abs_v)
+        pr_depth_abs_list.append(pr_z_abs_v)
+        depth_mask_list.append(valid_mask)
+
+        if compute_abs_metrics or return_fused_debug:
             masks_list.append(valid_mask)
             gt_pts_list_abs.append(gt_pts_abs_v)
             pr_pts_list_abs.append(pr_pts_abs_v)
-
             rgb_list_u8.append(
                 (rgb(batch_views[view_idx]["img"][batch_idx], batch_views[view_idx]["data_norm_type"][batch_idx]) * 255.0)
                 .astype(np.uint8)
             )
 
-        # -------- Absolute metrics (only if requested) --------
-        if compute_abs_metrics:
-            # points: Sim3 on this view only
-            pr_corr_t, gt_corr_t = gather_correspondences_from_pointmaps(
-                [pr_pts_abs_v], [gt_pts_abs_v], [valid_mask],
-                device=device, dtype=torch.float32,
-                max_samples_total=max_samples_per_view_abs,
-            )
-            s_v, R_v, t_v = sim3_from_correspondences_robust(
-                pr_corr_t, gt_corr_t, trim_ratio=sim3_trim_ratio, iters=1
-            )
-            pr_pts_abs_v_al = apply_sim3_to_points_np(pr_pts_abs_v, s_v, R_v, t_v)
-
-            e = np.linalg.norm(pr_pts_abs_v_al - gt_pts_abs_v, axis=-1)
-            e_valid = e[valid_mask]
-            if e_valid.size == 0:
-                abs_point_mae_list.append(np.nan)
-                abs_point_rmse_list.append(np.nan)
-            else:
-                abs_point_mae_list.append(float(np.mean(e_valid)))
-                abs_point_rmse_list.append(float(np.sqrt(np.mean(e_valid ** 2))))
-
-            # depth: affine a*z+b on this view only
-            gt_z_abs_v = gt_info_abs["z_depths"][view_idx][batch_idx].cpu().numpy()[..., 0]  # (H,W)
-            pr_z_abs_v = pr_info_abs["z_depths"][view_idx][batch_idx].cpu().numpy()[..., 0]  # (H,W)
-            a, b = fit_affine_1d_np(pr_z_abs_v, gt_z_abs_v, valid_mask)
-            pr_z_abs_v_al = a * pr_z_abs_v + b
-
-            ez = np.abs(pr_z_abs_v_al - gt_z_abs_v)
-            ez_valid = ez[valid_mask]
-            if ez_valid.size == 0:
-                abs_z_mae_list.append(np.nan)
-                abs_z_rmse_list.append(np.nan)
-            else:
-                abs_z_mae_list.append(float(np.mean(ez_valid)))
-                abs_z_rmse_list.append(float(np.sqrt(np.mean(ez_valid ** 2))))
-
-    # =========================
-    # Aggregate per-view metrics (always)
-    # =========================
+    # --------------------------------------------------
+    # Aggregate relative metrics
+    # --------------------------------------------------
     metrics: Dict[str, float] = {}
     metrics["pointmaps_abs_rel"] = float(np.nanmean(pointmaps_abs_rel_list))
     metrics["pointmaps_inlier_thres_103"] = float(np.nanmean(pointmaps_inlier_103_list))
@@ -840,9 +738,9 @@ def compute_set_metrics(
     metrics["z_depth_inlier_thres_103"] = float(np.nanmean(z_inlier_103_list))
     metrics["ray_dirs_err_deg"] = float(np.nanmean(ray_err_deg_list))
 
-    # =========================
-    # Pose metrics (always)
-    # =========================
+    # --------------------------------------------------
+    # Relative pose metrics
+    # --------------------------------------------------
     pose_ate = evaluate_ate(gt_traj=gt_poses_curr_set, est_traj=pr_poses_curr_set)
     metrics["pose_ate_rmse"] = float(pose_ate)
 
@@ -853,118 +751,129 @@ def compute_set_metrics(
         gt_se3=gt_poses_curr_set_t,
         num_frames=pr_poses_curr_set_t.shape[0],
     )
-    rError = rel_rangle_deg.cpu().numpy()
-    tError = rel_tangle_deg.cpu().numpy()
-    pose_auc_5, _ = calculate_auc_np(rError, tError, max_threshold=5)
+    r_error = rel_rangle_deg.cpu().numpy()
+    t_error = rel_tangle_deg.cpu().numpy()
+    pose_auc_5, _ = calculate_auc_np(r_error, t_error, max_threshold=5)
     metrics["pose_auc_5"] = float(pose_auc_5 * 100.0)
 
-    # =========================
-    # Metric scale (always)
-    # =========================
-    if gt_info.get("metric_scale", None) is not None and pr_info.get("metric_scale", None) is not None:
-        gt_metric_scale = gt_info["metric_scale"][batch_idx].detach().cpu().numpy()
-        pr_metric_scale = pr_info["metric_scale"][batch_idx].detach().cpu().numpy()
-
-        # robust to shape: (1,1,1,1) / (1,) / scalar
-        gt_metric_scale = np.asarray(gt_metric_scale).squeeze()
-        pr_metric_scale = np.asarray(pr_metric_scale).squeeze()
-
-        # avoid div-by-zero; and reduce to scalar robustly
-        denom = np.maximum(gt_metric_scale, 1e-12)
-        val = np.abs(pr_metric_scale - gt_metric_scale) / denom
-        metrics["metric_scale_abs_rel"] = float(np.nanmean(val))
-    else:
-        metrics["metric_scale_abs_rel"] = float("nan")
-    
-    # Save pr_to_gt_scale (computed in get_all_info...)
+    # --------------------------------------------------
+    # Alignment summary numbers
+    # --------------------------------------------------
     metrics["pr_to_gt_scale"] = float(scale_factors["pr_to_gt_scale"][batch_idx].item())
+    metrics["metric_scale_abs_rel"] = float(abs(metrics["pr_to_gt_scale"] - 1.0))
 
-    # =========================
-    # Absolute metrics and / or fused pointcloud
-    # =========================
+    sim3_valid = bool(scale_factors["sim3_valid"][batch_idx].item())
+    metrics["sim3_valid"] = 1.0 if sim3_valid else 0.0
+    metrics["sim3_failure"] = 0.0 if sim3_valid else 1.0
+    metrics["sim3_num_corr"] = float(scale_factors["sim3_num_corr"][batch_idx].item())
+    metrics["sim3_median_residual"] = float(scale_factors["sim3_median_residual"][batch_idx].item())
+    metrics["sim3_inlier_ratio"] = float(scale_factors["sim3_inlier_ratio"][batch_idx].item())
+    metrics["total_count"] = 1.0
+
     fused_debug: Optional[FusedPCDebug] = None
 
-    if need_abs_data:
-        # First build fused point clouds in abs domain
-        pr_corr_t, gt_corr_t = gather_correspondences_from_pointmaps(
-            pr_pts_list_abs, gt_pts_list_abs, masks_list,
-            device=device, dtype=torch.float32,
-            max_samples_total=10000,
-        )
-        s0, R0, t0 = sim3_from_correspondences_robust(
-            pr_corr_t, gt_corr_t, trim_ratio=trim_ratio, iters=sim3_iters
-        )
+    # --------------------------------------------------
+    # Absolute metrics
+    # --------------------------------------------------
+    if compute_abs_metrics:
+        if sim3_valid:
+            # System/global absolute pointmap quality after ONE global Sim(3)
+            metrics["pointmaps_abs_mae_global"] = float(np.nanmean(global_point_mae_list))
+            metrics["pointmaps_abs_rmse_global"] = float(np.nanmean(global_point_rmse_list))
 
-        gt_merged_abs, gt_colors = merge_masked_points_list(gt_pts_list_abs, rgb_list_u8, masks_list)
-        pr_merged_abs, pr_colors = merge_masked_points_list(pr_pts_list_abs, rgb_list_u8, masks_list)
-
-        if pr_merged_abs.shape[0] > 0:
-            pr_merged_abs_t = torch.from_numpy(pr_merged_abs).to(device=device, dtype=torch.float32)
-            pr_merged_abs_aligned_t = (s0 * (R0 @ pr_merged_abs_t.t())).t() + t0[None, :]
-            pr_merged_abs_aligned = pr_merged_abs_aligned_t.detach().cpu().numpy()
-        else:
-            pr_merged_abs_aligned = pr_merged_abs
-
-        gt_ds, gt_colors_ds = voxel_downsample_np(gt_merged_abs, gt_colors, voxel)
-        pr_ds, pr_colors_ds = voxel_downsample_np(pr_merged_abs_aligned, pr_colors, voxel)
-
-        # -------- Absolute metrics only when requested --------
-        if compute_abs_metrics:
-            metrics["pointmaps_abs_mae"] = float(np.nanmean(abs_point_mae_list))
-            metrics["pointmaps_abs_rmse"] = float(np.nanmean(abs_point_rmse_list))
-            metrics["z_depth_abs_mae"] = float(np.nanmean(abs_z_mae_list))
-            metrics["z_depth_abs_rmse"] = float(np.nanmean(abs_z_rmse_list))
-
-            # Absolute pose ATE
-            gt_poses_abs_curr_set = [gt_info_abs["poses"][v][batch_idx] for v in range(n_views)]
-            pr_poses_abs_curr_set = [pr_info_abs["poses"][v][batch_idx] for v in range(n_views)]
+            # Absolute pose ATE in globally aligned world frame
             pose_ate_abs = evaluate_ate(gt_traj=gt_poses_abs_curr_set, est_traj=pr_poses_abs_curr_set)
             metrics["pose_ate_abs"] = float(pose_ate_abs)
 
-            # Fused pointcloud metrics (Sim3 + ICP + Chamfer)
-            gt_t = torch.from_numpy(gt_ds).to(device=device, dtype=torch.float32)
-            pr_t = torch.from_numpy(pr_ds).to(device=device, dtype=torch.float32)
+            # Sequence-level scale-only depth evaluation
+            depth_scale = solve_sequence_depth_scale(gt_depth_abs_list, pr_depth_abs_list, depth_mask_list)
+            z_mae_list, z_rmse_list, z_abs_rel_seq_list, z_delta1_list = [], [], [], []
+            for gt_d, pr_d, m in zip(gt_depth_abs_list, pr_depth_abs_list, depth_mask_list):
+                pr_al = depth_scale * pr_d
+                z_mae_list.append(depth_mae(gt_d, pr_al, m))
+                z_rmse_list.append(depth_rmse(gt_d, pr_al, m))
+                z_abs_rel_seq_list.append(depth_abs_rel(gt_d, pr_al, m))
+                z_delta1_list.append(depth_delta(gt_d, pr_al, m, thresh=1.25))
 
-            icp_gate = voxel * 3.0
-            max_icp_points = 1000
-            max_chamfer_points = 1000
+            metrics["z_depth_abs_mae_seq_scale"] = float(np.nanmean(z_mae_list))
+            metrics["z_depth_abs_rmse_seq_scale"] = float(np.nanmean(z_rmse_list))
+            metrics["z_depth_abs_rel_seq_scale"] = float(np.nanmean(z_abs_rel_seq_list))
+            metrics["z_depth_delta1_seq_scale"] = float(np.nanmean(z_delta1_list))
+        else:
+            metrics["pointmaps_abs_mae_global"] = float("nan")
+            metrics["pointmaps_abs_rmse_global"] = float("nan")
+            metrics["pose_ate_abs"] = float("nan")
+            metrics["z_depth_abs_mae_seq_scale"] = float("nan")
+            metrics["z_depth_abs_rmse_seq_scale"] = float("nan")
+            metrics["z_depth_abs_rel_seq_scale"] = float("nan")
+            metrics["z_depth_delta1_seq_scale"] = float("nan")
 
-            gt_t_icp = random_sample_points_torch(gt_t, max_icp_points)
-            pr_t_icp = random_sample_points_torch(pr_t, max_icp_points)
+    # --------------------------------------------------
+    # Fused pointcloud metrics / debug ply
+    # --------------------------------------------------
+    if compute_abs_metrics or return_fused_debug:
+        gt_merged_abs, gt_colors = merge_masked_points_list(gt_pts_list_abs, rgb_list_u8, masks_list)
+        pr_merged_abs, pr_colors = merge_masked_points_list(pr_pts_list_abs, rgb_list_u8, masks_list)
 
-            R1, t1, pr_refined = icp_se3_torch(
-                pr_t_icp, gt_t_icp,
-                iters=icp_iters,
-                max_corr_dist=icp_gate,
-                nn_src_chunk=2048,
-                nn_dst_chunk=2048,
-                max_src_corr=1500,
-                trimmed_ratio=trim_ratio,
-            )
+        gt_ds, gt_colors_ds = voxel_downsample_np(gt_merged_abs, gt_colors, voxel)
+        pr_ds, pr_colors_ds = voxel_downsample_np(pr_merged_abs, pr_colors, voxel)
 
-            inlier_dist = voxel * 2.0
-            abs_chamfer_l1, abs_chamfer_rmse, abs_inlier_ratio = chamfer_inlier_torch(
-                pr_refined, gt_t_icp,
-                inlier_dist,
-                nn_src_chunk=2048,
-                nn_dst_chunk=2048,
-                max_eval=max_chamfer_points,
-            )
+        if compute_abs_metrics:
+            if sim3_valid:
+                gt_t = torch.from_numpy(gt_ds).to(device=device, dtype=torch.float32)
+                pr_t = torch.from_numpy(pr_ds).to(device=device, dtype=torch.float32)
 
-            metrics["merged_pc_abs_chamfer_l1"] = float(abs_chamfer_l1) if np.isfinite(abs_chamfer_l1) else float("nan")
-            metrics["merged_pc_abs_chamfer_rmse"] = float(abs_chamfer_rmse) if np.isfinite(abs_chamfer_rmse) else float("nan")
-            metrics["merged_pc_abs_inlier_ratio"] = float(abs_inlier_ratio) if np.isfinite(abs_inlier_ratio) else float("nan")
+                if icp_iters > 0 and gt_t.shape[0] > 50 and pr_t.shape[0] > 50:
+                    icp_gate = voxel * 3.0
+                    _, _, pr_t = icp_se3_torch(
+                        pr_t,
+                        gt_t,
+                        iters=icp_iters,
+                        max_corr_dist=icp_gate,
+                        nn_src_chunk=2048,
+                        nn_dst_chunk=2048,
+                        max_src_corr=1500,
+                        trimmed_ratio=trim_ratio,
+                    )
 
-            if return_fused_debug:
-                fused_debug = FusedPCDebug(
-                    gt_ds=gt_ds,
-                    gt_colors_ds=gt_colors_ds,
-                    pr_ds=pr_ds,
-                    pr_colors_ds=pr_colors_ds,
-                    chamfer_l1=float(abs_chamfer_l1),
+                inlier_dist = voxel * 2.0
+                abs_chamfer_l1, abs_chamfer_rmse, abs_inlier_ratio = chamfer_inlier_torch(
+                    pr_t,
+                    gt_t,
+                    inlier_dist,
+                    nn_src_chunk=2048,
+                    nn_dst_chunk=2048,
+                    max_eval=20000,
+                )
+                metrics["merged_pc_abs_chamfer_l1"] = float(abs_chamfer_l1) if np.isfinite(abs_chamfer_l1) else float("nan")
+                metrics["merged_pc_abs_chamfer_rmse"] = (
+                    float(abs_chamfer_rmse) if np.isfinite(abs_chamfer_rmse) else float("nan")
+                )
+                metrics["merged_pc_abs_inlier_ratio"] = (
+                    float(abs_inlier_ratio) if np.isfinite(abs_inlier_ratio) else float("nan")
                 )
 
-        # -------- If only need visualization, still return fused ply --------
+                if return_fused_debug:
+                    fused_debug = FusedPCDebug(
+                        gt_ds=gt_ds,
+                        gt_colors_ds=gt_colors_ds,
+                        pr_ds=pr_t.detach().cpu().numpy(),
+                        pr_colors_ds=pr_colors_ds,
+                        chamfer_l1=float(abs_chamfer_l1),
+                    )
+            else:
+                metrics["merged_pc_abs_chamfer_l1"] = float("nan")
+                metrics["merged_pc_abs_chamfer_rmse"] = float("nan")
+                metrics["merged_pc_abs_inlier_ratio"] = float("nan")
+
+                if return_fused_debug:
+                    fused_debug = FusedPCDebug(
+                        gt_ds=gt_ds,
+                        gt_colors_ds=gt_colors_ds,
+                        pr_ds=pr_ds,
+                        pr_colors_ds=pr_colors_ds,
+                        chamfer_l1=float("nan"),
+                    )
         elif return_fused_debug:
             fused_debug = FusedPCDebug(
                 gt_ds=gt_ds,

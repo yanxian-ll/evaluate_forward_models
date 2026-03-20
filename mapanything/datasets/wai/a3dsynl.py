@@ -96,12 +96,12 @@ def get_parser():
 
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "-rd", "--root_dir", default="/home/csuzhang/disk/a3dscenes/A3D-Syn-L", type=str
+        "-rd", "--root_dir", default="../../dataset/data/A3D-Syn-L", type=str
     )
     parser.add_argument(
         "-dmd",
         "--dataset_metadata_dir",
-        default="/home/csuzhang/disk/a3dscenes/metadata",
+        default="../../dataset/data/metadata",
         type=str,
     )
     parser.add_argument(
@@ -133,7 +133,7 @@ if __name__ == "__main__":
 
     dataset = A3DSynLargeWAI(
         num_views=args.num_of_views,
-        split="train",
+        split="test",
         covisibility_thres=0.1,
         covisibility_thres_max=1.0,
         ROOT=args.root_dir,
@@ -151,7 +151,7 @@ if __name__ == "__main__":
         rr.set_time("stable_time", sequence=0)
         rr.log("world", rr.ViewCoordinates.RDF, static=True)
 
-    sampled_indices = np.random.choice(len(dataset), size=39, replace=False)
+    sampled_indices = np.random.choice(len(dataset), size=2, replace=False)
 
     for num, idx in enumerate(tqdm(sampled_indices)):
         views = dataset[idx]

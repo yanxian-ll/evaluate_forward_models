@@ -182,6 +182,7 @@ class VGGTWrapper(torch.nn.Module):
                         "pts3d": curr_view_pts3d,
                         "pts3d_cam": curr_view_pts3d_cam,
                         "ray_directions": curr_view_ray_dirs,
+                        "intrinsics": curr_view_intrinsic,
                         "depth_along_ray": curr_view_depth_along_ray,
                         "cam_trans": curr_view_cam_translations,
                         "cam_quats": curr_view_cam_quats,
