@@ -7,36 +7,36 @@
 
 export HYDRA_FULL_ERROR=1
 
-# Define the batch sizes and number of views to loop over
+# batch size, views, dataset, seed
 batch_sizes_and_views=(
-    "10 2 benchmark_518_eth3d_snpp_tav2"
-    "10 4 benchmark_518_eth3d_snpp_tav2"
-    "10 8 benchmark_518_eth3d_snpp_tav2"
-    "5 16 benchmark_518_eth3d_snpp_tav2"
-    "4 24 benchmark_518_eth3d_snpp_tav2"
-    "2 32 benchmark_518_eth3d_snpp_tav2"
-    "1 50 benchmark_518_eth3d_snpp_tav2"
-    "1 100 benchmark_518_eth3d_snpp_tav2"
+    "15 2 benchmark_518_synl 2"
+    "10 4 benchmark_518_synl 4"
+    "5 8 benchmark_518_synl 8"
+    "2 16 benchmark_518_synl 16"
+    "1 24 benchmark_518_synl 24"
+    "1 32 benchmark_518_synl 32"
 )
 
 # Loop through each combination
 for combo in "${batch_sizes_and_views[@]}"; do
     # Split the string into batch_size and num_views
-    read -r batch_size num_views dataset <<< "$combo"
-
-    echo "Running $dataset with batch_size=$batch_size and num_views=$num_views"
+    read -r batch_size num_views dataset seed <<< "$combo"
+    
+    echo "Running $dataset with batch_size=$batch_size and num_views=$num_views, seed=$seed"
 
     python3 \
         benchmarking/dense_n_view/benchmark.py \
         machine=aws \
+        seed=$seed \
+        compute_abs_metrics=true \
+        save_n_fused_ply=3 \
         dataset=$dataset \
         dataset.num_workers=12 \
         dataset.num_views=$num_views \
         batch_size=$batch_size \
-        model=vggt \
-        hydra.run.dir='${root_experiments_dir}/mapanything/benchmarking/dense_'"${num_views}"'_view/vggt'
+        model=pi3 \
+        model.model_config.pretrained_model_name_or_path="checkpoints/pi3" \
+        hydra.run.dir='${root_experiments_dir}/mapanything/benchmarking/dense_'"${num_views}"'_view/pi3'
 
     echo "Finished running $dataset with batch_size=$batch_size and num_views=$num_views"
 done
-
-

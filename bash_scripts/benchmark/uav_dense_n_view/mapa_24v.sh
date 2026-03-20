@@ -7,35 +7,38 @@
 
 export HYDRA_FULL_ERROR=1
 
-# Define the batch sizes and number of views to loop over
+# batch size, views, dataset, seed
 batch_sizes_and_views=(
-    "20 2 benchmark_518_a3d_bmvs"
-    "20 4 benchmark_518_a3d_bmvs"
-    "10 8 benchmark_518_a3d_bmvs"
-    "4 16 benchmark_518_a3d_bmvs"
-    "3 24 benchmark_518_a3d_bmvs"
-    "2 32 benchmark_518_a3d_bmvs"
+    "15 2 benchmark_518_synl 2"
+    "10 4 benchmark_518_synl 4"
+    "5 8 benchmark_518_synl 8"
+    "2 16 benchmark_518_synl 16"
+    "1 24 benchmark_518_synl 24"
+    "1 32 benchmark_518_synl 32"
 )
 
 # Loop through each combination
 for combo in "${batch_sizes_and_views[@]}"; do
     # Split the string into batch_size and num_views
-    read -r batch_size num_views dataset <<< "$combo"
-
-    echo "Running $dataset with batch_size=$batch_size and num_views=$num_views"
+    read -r batch_size num_views dataset seed <<< "$combo"
+    
+    echo "Running $dataset with batch_size=$batch_size and num_views=$num_views, seed=$seed"
 
     python3 \
         benchmarking/dense_n_view/benchmark.py \
         machine=aws \
+        seed=$seed \
+        compute_abs_metrics=true \
+        save_n_fused_ply=3 \
         dataset=$dataset \
         dataset.num_workers=12 \
         dataset.num_views=$num_views \
         batch_size=$batch_size \
-        model=mapanything_v1 \
-        model/task=calibrated_sfm \
+        model=mapanything \
+        model/task=images_only \
         model.encoder.uses_torch_hub=false \
-        model.pretrained='${root_experiments_dir}/mapanything/training/mapa_finetuning_v1/checkpoint-last.pth' \
-        hydra.run.dir='${root_experiments_dir}/mapanything/benchmarking/dense_'"${num_views}"'_view/uav_mapa_csfm'
+        model.pretrained='checkpoints/map-anything/map-anything.pth' \
+        hydra.run.dir='${root_experiments_dir}/mapanything/benchmarking/dense_'"${num_views}"'_view/mapa_24v'
 
     echo "Finished running $dataset with batch_size=$batch_size and num_views=$num_views"
 done
