@@ -2,32 +2,29 @@
 # -*- coding: utf-8 -*-
 
 """
-ONE dense_n_view → ONE figure (recommended for papers)
+ONE dense_n_view → ONE figure for paper metrics.
 
 Goal:
 - Input a dense_n_view directory (e.g. .../dense_16_view)
 - Read per_dataset_results.json for each method under it
-- Visualize the selected 8 metrics across datasets, with ALL methods in ONE figure
+- Visualize the selected 4 paper metrics across datasets, with ALL methods in ONE figure
 
-Key design (top-tier, rigorous):
-- 8 subplots (2x4), each subplot = ONE metric
+Default metrics (failure_rate excluded):
+- RayErr      -> ray_dirs_err_deg
+- ATE         -> pose_ate_abs
+- Chamfer     -> merged_pc_abs_chamfer_l1
+- AbsRel      -> z_depth_abs_rel_seq_scale
+
+Layout:
+- 1x4 subplots, each subplot = ONE metric
 - X-axis = datasets (including "Average" optionally)
-- Within each subplot: grouped bars (methods) for that metric
-  -> This is the cleanest SOTA-style comparison when n is fixed and you compare methods.
-- Handle long dataset labels via horizontal layout + rotation and tight layout.
-
-Notes:
-- No error bars (your json has single-run numbers).
-- If you later have repeated runs: extend to mean±std with error bars.
+- Within each subplot: grouped bars of all methods
 
 Usage:
-  python plot_dense_view_all_methods_8metrics.py \
-    --dense_view_dir experiments/mapanything/benchmarking/dense_16_view \
-    --output experiments/mapanything/benchmarking/figs_dense_16_view \
-    --include_average
-
-Optional:
-  --no_average / --figsize 16 7 / --metrics k1,k2,...
+  python scripts/viz/plot_dense_view_per_methold.py \
+      --dense_view_dir experiments/mapanything/benchmarking/dense_16_view \
+      --output experiments/mapanything/benchmarking/figs_dense_16_view \
+      --include_average
 """
 
 from __future__ import annotations
@@ -38,7 +35,7 @@ import re
 from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional, Iterable
+from typing import Iterable, Optional
 
 import matplotlib.pyplot as plt
 
@@ -52,32 +49,23 @@ class MethodCfg:
 
 
 def build_methods_cfg() -> "OrderedDict[str, MethodCfg]":
-    """Keep your method order stable here."""
+    """Keep method order stable here."""
     return OrderedDict(
         [
             ("MapAnything", MethodCfg(subdir="mapa_24v")),
-            ("VGGT",        MethodCfg(subdir="vggt")),
-            ("Pi3",         MethodCfg(subdir="pi3")),
-            ("Pi3X",        MethodCfg(subdir="pi3x")),
-            ("DA3",         MethodCfg(subdir="da3")),
-            ("HunYuan",     MethodCfg(subdir="hunyuan")),
-            ("UAVMapa",     MethodCfg(subdir="uav_mapa")),
+            ("VGGT", MethodCfg(subdir="vggt")),
+            ("Pi3", MethodCfg(subdir="pi3")),
+            ("DA3", MethodCfg(subdir="da3")),
         ]
     )
 
 
-# 8 metrics: 4 relative + 4 absolute (comprehensive)
-METRICS_8 = [
-    # -------- Relative (4) --------
-    "z_depth_abs_rel",
-    "pointmaps_abs_rel",
-    "pose_auc_5",
+# 4 metrics used in the current paper figure (failure_rate excluded)
+METRICS_4 = [
     "ray_dirs_err_deg",
-    # -------- Absolute (4) --------
-    "z_depth_abs_mae",
-    "pointmaps_abs_mae",
     "pose_ate_abs",
     "merged_pc_abs_chamfer_l1",
+    "z_depth_abs_rel_seq_scale",
 ]
 
 
@@ -85,7 +73,7 @@ METRICS_8 = [
 # Utilities
 # -----------------------------
 def find_per_dataset_results(search_dir: Path) -> Optional[Path]:
-    """Locate <search_dir>/per_dataset_results.json"""
+    """Locate <search_dir>/per_dataset_results.json."""
     if not search_dir.is_dir():
         return None
     p = search_dir / "per_dataset_results.json"
@@ -132,13 +120,14 @@ def pretty_metric_name(metric_key: str) -> str:
         "pose_auc_5": "Pose AUC@5°",
         "z_depth_abs_rel": "Z-Depth AbsRel",
         "z_depth_inlier_thres_103": "Z-Depth Inlier@1e-3",
-        "ray_dirs_err_deg": "RayDirs Err (deg)",
+        "ray_dirs_err_deg": "RayErr (deg)",
         "pointmaps_abs_mae": "PointMaps MAE",
         "pointmaps_abs_rmse": "PointMaps RMSE",
         "z_depth_abs_mae": "Z-Depth MAE",
         "z_depth_abs_rmse": "Z-Depth RMSE",
-        "pose_ate_abs": "Pose ATE Abs",
-        "merged_pc_abs_chamfer_l1": "ChamferL1",
+        "z_depth_abs_rel_seq_scale": "AbsRel",
+        "pose_ate_abs": "ATE",
+        "merged_pc_abs_chamfer_l1": "Chamfer",
         "merged_pc_abs_chamfer_rmse": "ChamferRMSE",
         "merged_pc_abs_inlier_ratio": "InlierRatio",
         "pr_to_gt_scale": "PR/GT Scale",
@@ -194,9 +183,8 @@ def load_dense_view_metrics(
 
     method_labels = list(methods.keys())
 
-    # read json for each method (if missing -> empty dict)
     method_objs: list[dict] = []
-    for m, cfg in methods.items():
+    for _, cfg in methods.items():
         jf = find_per_dataset_results(dense_view_dir / cfg.subdir)
         if jf is None:
             method_objs.append({})
@@ -212,7 +200,7 @@ def load_dense_view_metrics(
 
     cube = np.full((len(metrics), len(dataset_keys), len(method_labels)), np.nan, dtype=np.float64)
 
-    for mj, (m_label, _) in enumerate(methods.items()):
+    for mj, (_, _) in enumerate(methods.items()):
         obj = method_objs[mj]
         for di, dkey in enumerate(dataset_keys):
             dobj = obj.get(dkey, {})
@@ -230,9 +218,9 @@ def load_dense_view_metrics(
 
 
 # -----------------------------
-# Plot: 2x4 grouped bar charts
+# Plot: 1x4 grouped bar charts
 # -----------------------------
-def plot_dense_view_all_methods_8metrics(
+def plot_dense_view_all_methods_4metrics(
     dense_view_dir: Path,
     methods: "OrderedDict[str, MethodCfg]",
     metrics: list[str],
@@ -244,7 +232,7 @@ def plot_dense_view_all_methods_8metrics(
 ) -> tuple[Path, Path]:
     """
     ONE figure:
-      2x4 subplots, each subplot is one metric,
+      1x4 subplots, each subplot is one metric,
       grouped bars across methods for each dataset.
     """
     import numpy as np
@@ -259,12 +247,12 @@ def plot_dense_view_all_methods_8metrics(
 
     out_dir.mkdir(parents=True, exist_ok=True)
     if out_name is None:
-        out_name = f"groupbars__{sanitize_filename(dense_view_dir.name)}__{sanitize_filename('8metrics')}"
+        out_name = f"groupbars__{sanitize_filename(dense_view_dir.name)}__{sanitize_filename('4metrics')}"
 
     setup_paper_style()
 
-    fig, axes = plt.subplots(2, 4, figsize=figsize, constrained_layout=False)
-    axes = axes.flatten()
+    fig, axes = plt.subplots(1, 4, figsize=figsize, constrained_layout=False)
+    axes = axes.flatten() if hasattr(axes, "flatten") else [axes]
 
     n_d = len(dataset_keys)
     n_m = len(method_labels)
@@ -277,9 +265,8 @@ def plot_dense_view_all_methods_8metrics(
         ax = axes[mi]
 
         for mj, m_label in enumerate(method_labels):
-            # center the group around x
             offset = (mj - (n_m - 1) / 2.0) * bar_w
-            y = cube[mi, :, mj]  # [dataset]
+            y = cube[mi, :, mj]
             ax.bar(x + offset, y, width=bar_w * 0.95, label=m_label)
 
         ax.set_title(pretty_metric_name(mk))
@@ -287,25 +274,17 @@ def plot_dense_view_all_methods_8metrics(
         ax.set_xticks(x)
         ax.set_xticklabels(dataset_keys, rotation=rotate_xticks, ha="right")
 
-        # Optional: tighten y limits for AUC to improve readability (comment out if not desired)
-        # if mk == "pose_auc_5":
-        #     ax.set_ylim(bottom=0)
-
-    # hide extra axes if metrics < 8
     for j in range(len(metrics), len(axes)):
         axes[j].axis("off")
 
-    # suptitle
-    fig.suptitle(f"{dense_view_dir.name}: Method comparison on 8 metrics", y=0.995, fontsize=12)
+    fig.suptitle(f"{dense_view_dir.name}: Method comparison on 4 metrics", y=0.995, fontsize=12)
 
-    # unified legend at bottom
-    # collect unique handles
     handles, labels = axes[0].get_legend_handles_labels()
     fig.legend(
         handles,
         labels,
         loc="lower center",
-        ncol=min(len(labels), 6),
+        ncol=min(len(labels), 7),
         frameon=False,
         bbox_to_anchor=(0.5, 0.02),
         bbox_transform=fig.transFigure,
@@ -330,13 +309,13 @@ def plot_dense_view_all_methods_8metrics(
 def parse_figsize(vals: Iterable[str]) -> tuple[float, float]:
     v = list(vals)
     if len(v) != 2:
-        raise ValueError("--figsize requires two numbers, e.g. --figsize 16 7")
+        raise ValueError("--figsize requires two numbers, e.g. --figsize 20 4.8")
     return float(v[0]), float(v[1])
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="ONE dense_n_view → ONE figure: 2x4 grouped-bar subplots comparing all methods on 8 metrics."
+        description="ONE dense_n_view → ONE figure: 1x4 grouped-bar subplots comparing all methods on 4 paper metrics."
     )
     parser.add_argument(
         "--dense_view_dir",
@@ -359,14 +338,14 @@ def main() -> None:
     parser.add_argument(
         "--include_average",
         action="store_true",
-        help="Include 'Average' dataset as the last x-tick (recommended).",
+        help="Include 'Average' dataset as the last x-tick.",
     )
     parser.add_argument(
         "--figsize",
         type=str,
         nargs=2,
-        default=["16", "7"],
-        help="Figure size (width height), e.g. --figsize 16 7",
+        default=["20", "4.8"],
+        help="Figure size (width height), e.g. --figsize 20 4.8",
     )
     parser.add_argument(
         "--rotate_xticks",
@@ -378,7 +357,7 @@ def main() -> None:
         "--metrics",
         type=str,
         default="",
-        help="Optional override: comma-separated metric keys. If empty, uses built-in 8-metric set.",
+        help="Optional override: comma-separated metric keys. If empty, uses the built-in 4-metric paper set.",
     )
 
     args = parser.parse_args()
@@ -389,9 +368,9 @@ def main() -> None:
     if args.metrics.strip():
         metrics = [m.strip() for m in args.metrics.split(",") if m.strip()]
         if not metrics:
-            metrics = METRICS_8
+            metrics = METRICS_4
     else:
-        metrics = METRICS_8
+        metrics = METRICS_4
 
     if args.output.strip():
         out_dir = Path(args.output)
@@ -401,7 +380,7 @@ def main() -> None:
     out_name = args.out_name.strip() if args.out_name.strip() else None
     figsize = parse_figsize(args.figsize)
 
-    out_png, out_pdf = plot_dense_view_all_methods_8metrics(
+    out_png, out_pdf = plot_dense_view_all_methods_4metrics(
         dense_view_dir=dense_view_dir,
         methods=methods,
         metrics=metrics,

@@ -653,7 +653,8 @@ class VGGTAttentionController:
                     raise ValueError(
                         f"external_bias must have shape [B or 1, H or 1, N, N], got {external_bias.shape}"
                     )
-                logits = logits + external_bias.to(device=logits.device, dtype=logits.dtype)
+                # logits = logits + external_bias.to(device=logits.device, dtype=logits.dtype)
+                logits = external_bias.to(device=logits.device, dtype=logits.dtype)
 
             attn = logits.softmax(dim=-1)
             attn = this.attn_drop(attn)
@@ -1426,15 +1427,15 @@ def triangular_layer_lambda(layers: Sequence[int], peak: float) -> Dict[int, flo
 # -----------------------------------------------------------------------------
 def build_argparser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="VGGT visualization + LightGlue tie-point prior injection")
-    parser.add_argument("--image_folder", type=str, default="experiments/test_data", help="Input image folder")
-    parser.add_argument("--output_dir", type=str, default="experiments/test_vggt", help="Output directory")
+    parser.add_argument("--image_folder", type=str, default="experiments/test_data/sample4", help="Input image folder")
+    parser.add_argument("--output_dir", type=str, default="experiments/test_vggt4", help="Output directory")
     parser.add_argument("--device", type=str, default="cuda", help="Inference device; GPU strongly recommended")
     parser.add_argument("--machine", type=str, default="default", help="Hydra machine config")
     parser.add_argument("--model_name", type=str, default="vggt", help="Model config name")
     parser.add_argument("--resolution_set", type=int, default=518, choices=[504, 512, 518])
     parser.add_argument("--patch_size", type=int, default=14)
     parser.add_argument("--stride", type=int, default=1, help="Load every nth image")
-    parser.add_argument("--max_views", type=int, default=2, help="Optional cap on number of views after loading")
+    parser.add_argument("--max_views", type=int, default=0, help="Optional cap on number of views after loading")
     parser.add_argument("--torch_hub_dir", type=str, default="/opt/data/private/code/map-anything/checkpoints/torch_cache/hub")
     parser.add_argument("--local_dino_repo", type=str, default="/opt/data/private/code/map-anything/checkpoints/torch_cache/hub/facebookresearch_dinov2_main")
 
@@ -1455,7 +1456,7 @@ def build_argparser() -> argparse.ArgumentParser:
     parser.add_argument("--max_tracks_for_bias", type=int, default=1500)
 
     parser.add_argument("--capture_layers", type=str, default="10,11,12,13,14,15,16")
-    parser.add_argument("--inject_layers", type=str, default="14", help="'middle' or comma separated global layer ids")
+    parser.add_argument("--inject_layers", type=str, default="11, 13, 15", help="'middle' or comma separated global layer ids")
     parser.add_argument("--bias_lambda", type=float, default=2.0)
     parser.add_argument("--sigma_q", type=float, default=0.8, help="Gaussian spread in query patch grid")
     parser.add_argument("--sigma_k", type=float, default=0.8, help="Gaussian spread in key patch grid")
@@ -1667,6 +1668,7 @@ def main():
         baseline_logits_cache = {k: v.clone() for k, v in controller.saved_logits.items()}
 
         if args.save_depth:
+            print("[Info] Saving depth...")
             save_depth_maps(baseline_predictions, viz_dir / "baseline_depth", "baseline", fallback_rgbs=resized_rgbs)
 
         for layer_idx in capture_layers:

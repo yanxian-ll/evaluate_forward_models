@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-
 from __future__ import annotations
 
 import argparse
@@ -22,8 +21,8 @@ def parse_num_images(folder_name: str) -> int:
     Parse num_images from a folder name.
 
     Priority:
-      1) folder_name.split('_')[1] if it is an int
-      2) first integer found by regex
+    1) folder_name.split('_')[1] if it is an int
+    2) first integer found by regex
     """
     parts = folder_name.split("_")
     if len(parts) >= 2:
@@ -41,7 +40,9 @@ def parse_num_images(folder_name: str) -> int:
 def find_per_dataset_results(search_dir: Path) -> Optional[Path]:
     """
     Locate per_dataset_results.json under `search_dir`.
-    Searches for: <search_dir>/per_dataset_results.json
+
+    Searches for:
+        /per_dataset_results.json
     """
     if not search_dir.is_dir():
         return None
@@ -60,47 +61,21 @@ def sanitize_filename(s: str) -> str:
 def pretty_metric_name(metric_key: str) -> str:
     """
     Paper-friendly metric title, with an arrow:
-    ↑ : higher is better
-    ↓ : lower is better
+      ↑ : higher is better
+      ↓ : lower is better
     """
     higher_is_better = {
-        "metric_scale_abs_rel": False,
-        "pointmaps_abs_rel": False,
-        "pointmaps_inlier_thres_103": True,
-        "pose_ate_rmse": False,
-        "pose_auc_5": True,
-        "z_depth_abs_rel": False,
-        "z_depth_inlier_thres_103": True,
         "ray_dirs_err_deg": False,
-        "pointmaps_abs_mae": False,
-        "pointmaps_abs_rmse": False,
-        "z_depth_abs_mae": False,
-        "z_depth_abs_rmse": False,
         "pose_ate_abs": False,
         "merged_pc_abs_chamfer_l1": False,
-        "merged_pc_abs_chamfer_rmse": False,
-        "merged_pc_abs_inlier_ratio": True,
-        "pr_to_gt_scale": False,  # 如果你把 scale closer-to-1 当好，可改成 False 并单独解释
+        "z_depth_abs_rel_seq_scale": False,
     }
 
     mapping = {
-        "metric_scale_abs_rel": "Scale AbsRel",
-        "pointmaps_abs_rel": "PointMaps AbsRel",
-        "pointmaps_inlier_thres_103": "PointMaps Inlier@1e-3",
-        "pose_ate_rmse": "Pose ATE RMSE",
-        "pose_auc_5": "Pose AUC@5°",
-        "z_depth_abs_rel": "Z-Depth AbsRel",
-        "z_depth_inlier_thres_103": "Z-Depth Inlier@1e-3",
-        "ray_dirs_err_deg": "RayDirs Err (deg)",
-        "pointmaps_abs_mae": "PointMaps MAE",
-        "pointmaps_abs_rmse": "PointMaps RMSE",
-        "z_depth_abs_mae": "Z-Depth MAE",
-        "z_depth_abs_rmse": "Z-Depth RMSE",
-        "pose_ate_abs": "Pose ATE Abs",
-        "merged_pc_abs_chamfer_l1": "ChamferL1",
-        "merged_pc_abs_chamfer_rmse": "ChamferRMSE",
-        "merged_pc_abs_inlier_ratio": "InlierRatio",
-        "pr_to_gt_scale": "PR/GT Scale",
+        "ray_dirs_err_deg": "Ray Error (deg)",
+        "pose_ate_abs": "ATE",
+        "merged_pc_abs_chamfer_l1": "Chamfer-L1",
+        "z_depth_abs_rel_seq_scale": "AbsRel",
     }
 
     base = mapping.get(metric_key, metric_key.replace("_", " "))
@@ -118,33 +93,36 @@ class MethodCfg:
     marker: str
     linestyle: str
 
-
 def build_methods_cfg() -> "OrderedDict[str, MethodCfg]":
     return OrderedDict(
         [
-            ("MapAnything", MethodCfg(subdir="mapa_24v", color="C0", marker="o", linestyle="-")),
-            ("VGGT",        MethodCfg(subdir="vggt",    color="C1", marker="s", linestyle="-")),
-            ("Pi3",         MethodCfg(subdir="pi3",     color="C2", marker="^", linestyle="--")),
-            ("Pi3X",        MethodCfg(subdir="pi3x",    color="C3", marker="D", linestyle="--")),
-            ("DA3",         MethodCfg(subdir="da3",     color="C4", marker="v", linestyle="-.")),
-            ("HunYuan",     MethodCfg(subdir="hunyuan", color="C5", marker="P", linestyle=":")),
-            ("UAVMapa",     MethodCfg(subdir="uav_mapa",color="C6", marker="o", linestyle="-")),
+            # -------------------------
+            # Mapa family: same hue, different styles
+            # -------------------------
+            ("MapAnything", MethodCfg(subdir="mapa_24v",      color="#1f77b4", marker="o", linestyle="-")),
+            # ("Mapa-csfm",   MethodCfg(subdir="mapa_24v_csfm", color="#1f77b4", marker="s", linestyle="--")),
+            # ("Mapa-psfm",   MethodCfg(subdir="mapa_24v_psfm", color="#1f77b4", marker="^", linestyle="-.")),
+            # ("Mapa-mvs",    MethodCfg(subdir="mapa_24v_mvs",  color="#1f77b4", marker="D", linestyle=":")),
+
+            # -------------------------
+            # Other baselines
+            # -------------------------
+            ("VGGT",        MethodCfg(subdir="vggt",    color="#d62728", marker="o", linestyle="-")),
+            ("Pi3",         MethodCfg(subdir="pi3",     color="#2ca02c", marker="^", linestyle="--")),
+            ("DA3",         MethodCfg(subdir="da3",     color="#9467bd", marker="v", linestyle="-.")),
+            ("HunYuan",     MethodCfg(subdir="hunyuan", color="#8c564b", marker="P", linestyle=":")),
         ]
     )
 
-METRICS = [
-    # -------- Relative (4) --------
-    "z_depth_abs_rel",
-    "pointmaps_abs_rel",
-    "pose_auc_5",
-    "ray_dirs_err_deg",
 
-    # -------- Absolute (4) --------
-    "z_depth_abs_mae",
-    "pointmaps_abs_mae",
+# 论文主图：1x4，排除 failure rate
+METRICS = [
+    "ray_dirs_err_deg",
     "pose_ate_abs",
     "merged_pc_abs_chamfer_l1",
+    "z_depth_abs_rel_seq_scale",
 ]
+
 
 # -----------------------------
 # Core logic (per-dataset)
@@ -158,10 +136,10 @@ def collect_metrics_per_dataset(
     Collect metrics from per_dataset_results.json files.
 
     Return:
-      data[method_label][num_images][dataset_key][metric] = value
+        data[method_label][num_images][dataset_key][metric] = value
 
     Directory structure:
-      <root>/dense_*_view/<method_subdir>/per_dataset_results.json
+        /dense_*_view/<method_subdir>/per_dataset_results.json
     """
     if not root.is_dir():
         raise FileNotFoundError(f"Root benchmarking directory not found: {root}")
@@ -194,6 +172,7 @@ def collect_metrics_per_dataset(
             for dataset_key, dataset_obj in obj.items():
                 if not isinstance(dataset_obj, dict):
                     continue
+
                 d_bucket = num_bucket.setdefault(dataset_key, {})
                 for k in metrics:
                     if k in dataset_obj:
@@ -215,7 +194,7 @@ def collect_metrics_per_dataset(
     if not any_found:
         raise RuntimeError(
             f"No per_dataset_results.json found under root={root}. "
-            f"Expected: <root>/dense_*_view/<method>/per_dataset_results.json."
+            f"Expected: /dense_*_view/<method_subdir>/per_dataset_results.json."
         )
 
     return data
@@ -245,10 +224,9 @@ def extract_dataset_slice(
 ) -> dict[str, dict[int, dict[str, float]]]:
     """
     Convert:
-      data_all[method][num_images][dataset_key][metric]
+        data_all[method][num_images][dataset_key][metric]
     to:
-      data_slice[method][num_images][metric]
-    (for the plotting code that expects method->x->metric)
+        data_slice[method][num_images][metric]
     """
     data_slice: dict[str, dict[int, dict[str, float]]] = {}
     for method_label, by_x in data_all.items():
@@ -278,8 +256,10 @@ def plot_metrics_grid(
 
     setup_paper_style()
 
-    fig, axes = plt.subplots(2, 4, figsize=(13.5, 6.2), constrained_layout=False)
-    axes = axes.flatten()
+    # 1 x 4
+    fig, axes = plt.subplots(1, 4, figsize=(16.0, 3.8), constrained_layout=False)
+    if not isinstance(axes, (list, tuple)):
+        axes = axes.flatten()
 
     default_kw = dict(linewidth=1.8, markersize=5.0, markeredgewidth=0.8)
 
@@ -312,16 +292,14 @@ def plot_metrics_grid(
             )
 
         ax.set_title(pretty_metric_name(metric))
+        ax.set_xlabel("# Views")
         ax.grid(True, linestyle="--", linewidth=0.6, alpha=0.45)
         ax.set_xticks(all_x)
 
-    for j in range(len(metrics), len(axes)):
-        axes[j].axis("off")
-
     if suptitle:
-        fig.suptitle(suptitle, y=0.99, fontsize=12)
+        fig.suptitle(suptitle, y=0.98, fontsize=12)
 
-    fig.tight_layout(rect=[0.0, 0.14, 1.0, 0.97])
+    fig.tight_layout(rect=[0.0, 0.16, 1.0, 0.95])
 
     uniq_handles: OrderedDict[str, object] = OrderedDict()
     for ax in axes[: len(metrics)]:
@@ -334,9 +312,9 @@ def plot_metrics_grid(
         list(uniq_handles.values()),
         list(uniq_handles.keys()),
         loc="lower center",
-        ncol=min(len(uniq_handles), 6),
+        ncol=min(len(uniq_handles), 7),
         frameon=False,
-        bbox_to_anchor=(0.5, 0.02),
+        bbox_to_anchor=(0.5, 0.01),
         bbox_transform=fig.transFigure,
         columnspacing=1.2,
         handletextpad=0.6,
@@ -345,7 +323,7 @@ def plot_metrics_grid(
     out_png = out_dir / f"{out_name}.png"
     out_pdf = out_dir / f"{out_name}.pdf"
     fig.savefig(out_png, bbox_inches="tight")
-    # fig.savefig(out_pdf, bbox_inches="tight")
+    fig.savefig(out_pdf, bbox_inches="tight")
     plt.close(fig)
 
     return out_png, out_pdf
@@ -368,7 +346,7 @@ def main() -> None:
     parser.add_argument(
         "--out_prefix",
         type=str,
-        default="metrics_vs_num_images",
+        default="metrics_vs_num_views",
         help="Output figure prefix (dataset name will be appended).",
     )
     args = parser.parse_args()
@@ -403,7 +381,6 @@ def main() -> None:
     for dkey in dataset_keys_list:
         data_slice = extract_dataset_slice(data_all, dkey)
 
-        # Skip if this dataset has no valid points
         has_any = any(len(v) > 0 for v in data_slice.values())
         if not has_any:
             continue
@@ -423,9 +400,9 @@ def main() -> None:
 
     print(f"[OK] Saved {len(saved)} dataset figures to: {out_dir}")
     for p1, p2 in saved[:5]:
-        print(f"  - {p1.name}\n  - {p2.name}")
+        print(f" - {p1.name}\n - {p2.name}")
     if len(saved) > 5:
-        print(f"  ... and {len(saved) - 5} more.")
+        print(f" ... and {len(saved) - 5} more.")
 
 
 if __name__ == "__main__":
