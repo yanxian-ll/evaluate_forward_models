@@ -10,12 +10,12 @@ export HYDRA_FULL_ERROR=1
 
 # batch_size num_views dataset seed
 batch_sizes_and_views=(
-    "15 2 benchmark_518_synl 2"
-    "10 4 benchmark_518_synl 4"
-    "5 8 benchmark_518_synl 8"
-    "2 16 benchmark_518_synl 16"
-    "1 24 benchmark_518_synl 24"
-    "1 32 benchmark_518_synl 32"
+    "25 2 benchmark_518_bmvs 2"
+    "10 4 benchmark_518_bmvs 4"
+    "5 8 benchmark_518_bmvs 8"
+    "2 16 benchmark_518_bmvs 16"
+    "2 24 benchmark_518_bmvs 24"
+    "1 32 benchmark_518_bmvs 32"
 )
 
 # Loop through each combination
@@ -29,8 +29,8 @@ for combo in "${batch_sizes_and_views[@]}"; do
         benchmarking/dense_n_view/benchmark.py \
         machine=aws \
         seed=$seed \
-        compute_abs_metrics=false \
-        save_n_fused_ply=1 \
+        compute_abs_metrics=true \
+        save_n_fused_ply=3 \
         dataset=$dataset \
         dataset.num_workers=4 \
         dataset.num_views=$num_views \

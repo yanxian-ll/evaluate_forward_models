@@ -151,7 +151,7 @@ if __name__ == "__main__":
         rr.set_time("stable_time", sequence=0)
         rr.log("world", rr.ViewCoordinates.RDF, static=True)
 
-    sampled_indices = np.random.choice(len(dataset), size=2, replace=False)
+    sampled_indices = np.random.choice(len(dataset), size=10, replace=False)
 
     for num, idx in enumerate(tqdm(sampled_indices)):
         views = dataset[idx]

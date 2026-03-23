@@ -1427,8 +1427,8 @@ def triangular_layer_lambda(layers: Sequence[int], peak: float) -> Dict[int, flo
 # -----------------------------------------------------------------------------
 def build_argparser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="VGGT visualization + LightGlue tie-point prior injection")
-    parser.add_argument("--image_folder", type=str, default="experiments/test_data/sample4", help="Input image folder")
-    parser.add_argument("--output_dir", type=str, default="experiments/test_vggt4", help="Output directory")
+    parser.add_argument("--image_folder", type=str, default="experiments/test_data/sample01", help="Input image folder")
+    parser.add_argument("--output_dir", type=str, default="experiments/test_vggt01", help="Output directory")
     parser.add_argument("--device", type=str, default="cuda", help="Inference device; GPU strongly recommended")
     parser.add_argument("--machine", type=str, default="default", help="Hydra machine config")
     parser.add_argument("--model_name", type=str, default="vggt", help="Model config name")
