@@ -1,5 +1,6 @@
 # Local Files
 outputs/
+output/
 checkpoints/
 local/
 wandb/
