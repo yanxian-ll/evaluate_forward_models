@@ -10,12 +10,12 @@ export HYDRA_FULL_ERROR=1
 
 # batch size, views, dataset, seed
 batch_sizes_and_views=(
-    "15 2 benchmark_518_synl 2"
-    "10 4 benchmark_518_synl 4"
-    "5 8 benchmark_518_synl 8"
-    "2 16 benchmark_518_synl 16"
-    "1 24 benchmark_518_synl 24"
-    "1 32 benchmark_518_synl 32"
+    "15 2 benchmark_518_usegeo_synl 2"
+    "10 4 benchmark_518_usegeo_synl 4"
+    "5 8 benchmark_518_usegeo_synl 8"
+    "2 16 benchmark_518_usegeo_synl 16"
+    "1 24 benchmark_518_usegeo_synl 24"
+    "1 32 benchmark_518_usegeo_synl 32"
 )
 
 # Loop through each combination

@@ -103,6 +103,7 @@ def build_methods_cfg() -> "OrderedDict[str, MethodCfg]":
             # ("Mapa-csfm",   MethodCfg(subdir="mapa_24v_csfm", color="#1f77b4", marker="s", linestyle="--")),
             # ("Mapa-psfm",   MethodCfg(subdir="mapa_24v_psfm", color="#1f77b4", marker="^", linestyle="-.")),
             # ("Mapa-mvs",    MethodCfg(subdir="mapa_24v_mvs",  color="#1f77b4", marker="D", linestyle=":")),
+            ("MapaFinetune",    MethodCfg(subdir="uav_mapa",  color="#1f77b4", marker="D", linestyle=":")),
 
             # -------------------------
             # Other baselines
@@ -111,6 +112,7 @@ def build_methods_cfg() -> "OrderedDict[str, MethodCfg]":
             ("Pi3",         MethodCfg(subdir="pi3",     color="#2ca02c", marker="^", linestyle="--")),
             ("DA3",         MethodCfg(subdir="da3",     color="#9467bd", marker="v", linestyle="-.")),
             ("HunYuan",     MethodCfg(subdir="hunyuan", color="#8c564b", marker="P", linestyle=":")),
+
         ]
     )
 

@@ -34,6 +34,8 @@ from mapanything.datasets.wai.a3dsynl import A3DSynLargeWAI   # noqa
 from mapanything.datasets.wai.a3dsyns import A3DSynSmallWAI   # noqa
 from mapanything.datasets.wai.a3dscenes_instance import A3DScenesWAIInstance # noqa
 from mapanything.datasets.wai.a3dscenes_depth_completion import A3DScenesDepthCompletionWAI # noqa
+from mapanything.datasets.wai.usegeo import UseGeoWAI # noqa
+
 
 def get_test_data_loader(
     dataset, batch_size, num_workers=8, shuffle=False, drop_last=False, pin_mem=True

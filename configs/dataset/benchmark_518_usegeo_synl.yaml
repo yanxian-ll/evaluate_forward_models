@@ -12,9 +12,16 @@ covisibility_thres_max: 1.0
 sampling_mode: "random_walk" 
 
 # Test Resolution
+resolution_test_usegeo: ${dataset.resolution_options.518_1_33_ar} 
 resolution_test_a3dsynl: ${dataset.resolution_options.518_1_33_ar} 
 
 # Test Set
+# Sample 10 multi-view sets from each scene, 30 test scenes in total
+
+# test_dataset:
+#   "+ 30 @ ${dataset.usegeo_wai.test.dataset_str}
+#   + 150 @ ${dataset.a3dsynl_wai.test.dataset_str}"
+
 test_dataset:
-  "+ 150 @ ${dataset.a3dsynl_wai.test.dataset_str}"
+  "+ 30 @ ${dataset.usegeo_wai.test.dataset_str}"
   

@@ -110,9 +110,23 @@ class VGGTMidMatchWrapper(torch.nn.Module):
             state_dict = ckpt["model"]
         else:
             state_dict = ckpt
-        missing, unexpected = self.load_state_dict(state_dict, strict=False)
+        if not isinstance(state_dict, dict):
+            raise TypeError(f"Unsupported checkpoint format: {type(state_dict)}")
+        keys = list(state_dict.keys())
+        is_wrapper_ckpt = any(
+            k.startswith("model.") or k.startswith("midmatch_head.")
+            for k in keys
+        )
+        if is_wrapper_ckpt:
+            print("Detected wrapper-style checkpoint. Loading into the whole wrapper ...")
+            missing, unexpected = self.load_state_dict(state_dict, strict=False)
+        else:
+            print("Detected backbone-style checkpoint. Loading into self.model only ...")
+            missing, unexpected = self.model.load_state_dict(state_dict, strict=False)
         print(f"Missing keys: {missing}")
         print(f"Unexpected keys: {unexpected}")
+        num_loaded = len(keys) - len(unexpected)
+        print(f"Approx. loaded parameter entries: {num_loaded} / {len(keys)}")
         del ckpt
 
     def _attach_match_outputs(self, pred: dict, match_outputs: dict, view_idx: int) -> None:

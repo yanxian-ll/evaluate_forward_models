@@ -9,6 +9,7 @@ Extended VGGT test script with:
 4. Tie-point prior injection into VGGT middle global attention layers.
 5. Bias visualization.
 6. Delta-logits / delta-attention comparison between injected and baseline runs.
+7. Regular-grid token correspondence visualization from global attention.
 
 This file is intended to be dropped into `scripts/test_vggt.py` with minimal
 repository intrusion.
@@ -500,6 +501,20 @@ def patch_center_xy(
     py = patch_linear_idx // grid_w
     px = patch_linear_idx % grid_w
     return (px + 0.5) * patch_size, (py + 0.5) * patch_size
+
+
+def patch_bbox_xyxy(
+    patch_linear_idx: int,
+    patch_size: int,
+    grid_w: int,
+) -> Tuple[float, float, float, float]:
+    py = patch_linear_idx // grid_w
+    px = patch_linear_idx % grid_w
+    x0 = px * patch_size
+    y0 = py * patch_size
+    x1 = x0 + patch_size
+    y1 = y0 + patch_size
+    return x0, y0, x1, y1
 
 
 def _gaussian_offsets(radius: int, sigma: float):
@@ -1104,6 +1119,231 @@ def save_attention_patch_match_viz(
         )
 
 
+def _build_regular_grid_samples(
+    image_h: int,
+    image_w: int,
+    sample_rows: int,
+    sample_cols: int,
+    patch_size: int,
+    grid_w: int,
+    grid_h: int,
+    dedup_tokens: bool = False,
+) -> List[Dict]:
+    if sample_rows <= 0 or sample_cols <= 0:
+        return []
+
+    xs = np.linspace(0.0, float(image_w), sample_cols + 1)
+    ys = np.linspace(0.0, float(image_h), sample_rows + 1)
+
+    samples: List[Dict] = []
+    seen_tokens = set()
+    for row_idx in range(sample_rows):
+        for col_idx in range(sample_cols):
+            x0 = float(xs[col_idx])
+            x1 = float(xs[col_idx + 1])
+            y0 = float(ys[row_idx])
+            y1 = float(ys[row_idx + 1])
+            cx = 0.5 * (x0 + x1)
+            cy = 0.5 * (y0 + y1)
+
+            patch_x, patch_y, patch_idx = pixel_to_patch(
+                x=cx,
+                y=cy,
+                patch_size=patch_size,
+                grid_w=grid_w,
+                grid_h=grid_h,
+            )
+            if dedup_tokens and patch_idx in seen_tokens:
+                continue
+            seen_tokens.add(patch_idx)
+
+            samples.append(
+                {
+                    "grid_row": int(row_idx),
+                    "grid_col": int(col_idx),
+                    "cell_bbox_xyxy": [x0, y0, x1, y1],
+                    "query_xy": [cx, cy],
+                    "query_patch_xy": [int(patch_x), int(patch_y)],
+                    "query_patch_idx": int(patch_idx),
+                }
+            )
+    return samples
+
+
+def _save_single_grid_token_match_viz(
+    sub: np.ndarray,
+    img_a: np.ndarray,
+    img_b: np.ndarray,
+    output_path: Path,
+    patch_size: int,
+    grid_w: int,
+    grid_h: int,
+    sample_rows: int = 8,
+    sample_cols: int = 8,
+    title: Optional[str] = None,
+    dedup_tokens: bool = False,
+) -> None:
+    ha, wa = img_a.shape[:2]
+    hb, wb = img_b.shape[:2]
+    if ha != hb or wa != wb:
+        raise ValueError(f"Expected resized views with identical shape, got {img_a.shape} vs {img_b.shape}")
+
+    samples = _build_regular_grid_samples(
+        image_h=ha,
+        image_w=wa,
+        sample_rows=sample_rows,
+        sample_cols=sample_cols,
+        patch_size=patch_size,
+        grid_w=grid_w,
+        grid_h=grid_h,
+        dedup_tokens=dedup_tokens,
+    )
+    if not samples:
+        return
+
+    all_scores = []
+    match_records = []
+    for sample in samples:
+        qidx = int(sample["query_patch_idx"])
+        row = sub[qidx]
+        kidx = int(row.argmax())
+        score = float(row[kidx])
+
+        dst_px = int(kidx % grid_w)
+        dst_py = int(kidx // grid_w)
+        dst_center = patch_center_xy(kidx, patch_size, grid_w)
+
+        record = dict(sample)
+        record["matched_patch_idx"] = int(kidx)
+        record["matched_patch_xy"] = [dst_px, dst_py]
+        record["matched_xy"] = [float(dst_center[0]), float(dst_center[1])]
+        record["attention_score"] = score
+        match_records.append(record)
+        all_scores.append(score)
+
+    score_min = float(min(all_scores))
+    score_max = float(max(all_scores))
+    score_span = max(score_max - score_min, 1e-8)
+
+    header_h = 24 if title else 0
+    canvas = Image.new("RGB", (wa + wb, max(ha, hb) + header_h), (255, 255, 255))
+    canvas.paste(Image.fromarray(img_a), (0, header_h))
+    canvas.paste(Image.fromarray(img_b), (wa, header_h))
+    draw = ImageDraw.Draw(canvas)
+    # if title:
+    #     draw.text((6, 4), title, fill=(0, 0, 0))
+
+    # # Draw regular grid on the query image for readability.
+    # for r in range(1, sample_rows):
+    #     y = header_h + int(round(r * ha / sample_rows))
+    #     draw.line([(0, y), (wa, y)], fill=(180, 180, 180), width=1)
+    # for c in range(1, sample_cols):
+    #     x = int(round(c * wa / sample_cols))
+    #     draw.line([(x, header_h), (x, header_h + ha)], fill=(180, 180, 180), width=1)
+
+    for record in match_records:
+        src_x, src_y = record["query_xy"]
+        dst_x, dst_y = record["matched_xy"]
+        qidx = int(record["query_patch_idx"])
+        kidx = int(record["matched_patch_idx"])
+        score = float(record["attention_score"])
+        score01 = (score - score_min) / score_span
+
+        color = (
+            int(255 * score01),
+            int(60 + 160 * (1.0 - score01)),
+            int(255 * (1.0 - score01)),
+        )
+
+        # qx0, qy0, qx1, qy1 = patch_bbox_xyxy(qidx, patch_size, grid_w)
+        # kx0, ky0, kx1, ky1 = patch_bbox_xyxy(kidx, patch_size, grid_w)
+
+        # draw.rectangle((qx0, header_h + qy0, qx1, header_h + qy1), outline=color, width=1)
+        # draw.rectangle((wa + kx0, header_h + ky0, wa + kx1, header_h + ky1), outline=color, width=1)
+        draw.line(
+            [(src_x, header_h + src_y), (wa + dst_x, header_h + dst_y)],
+            fill=color,
+            width=1,
+        )
+        draw.ellipse((src_x - 2, header_h + src_y - 2, src_x + 2, header_h + src_y + 2), fill=color)
+        draw.ellipse((wa + dst_x - 2, header_h + dst_y - 2, wa + dst_x + 2, header_h + dst_y + 2), fill=color)
+
+    canvas.save(output_path)
+
+    meta = {
+        "query_image_size": [int(ha), int(wa)],
+        "patch_grid_size": [int(grid_h), int(grid_w)],
+        "patch_size": int(patch_size),
+        "sample_grid_size": [int(sample_rows), int(sample_cols)],
+        "dedup_tokens": bool(dedup_tokens),
+        "num_samples": int(len(match_records)),
+        "matches": match_records,
+    }
+    save_json(output_path.with_suffix(".json"), meta)
+
+
+def save_attention_grid_token_match_viz(
+    attn: torch.Tensor,
+    img_a: np.ndarray,
+    img_b: np.ndarray,
+    output_path: Path,
+    view_a: int,
+    view_b: int,
+    per_view_tokens: int,
+    patch_start_idx: int,
+    patch_size: int,
+    grid_w: int,
+    grid_h: int,
+    sample_rows: int = 8,
+    sample_cols: int = 8,
+    title: Optional[str] = None,
+    save_per_head: bool = False,
+    dedup_tokens: bool = False,
+) -> None:
+    sub = _extract_pair_attention_block(
+        attn=attn,
+        view_a=view_a,
+        view_b=view_b,
+        per_view_tokens=per_view_tokens,
+        patch_start_idx=patch_start_idx,
+    )
+
+    avg = sub.mean(dim=0).numpy()
+    base_title = title or f"Grid token matches view {view_a} -> view {view_b}"
+    _save_single_grid_token_match_viz(
+        sub=avg,
+        img_a=img_a,
+        img_b=img_b,
+        output_path=output_path,
+        patch_size=patch_size,
+        grid_w=grid_w,
+        grid_h=grid_h,
+        sample_rows=sample_rows,
+        sample_cols=sample_cols,
+        title=f"{base_title} (avg heads)",
+        dedup_tokens=dedup_tokens,
+    )
+
+    if not save_per_head:
+        return
+
+    head_dir = ensure_dir(output_path.parent / f"{output_path.stem}_heads")
+    for head_idx in range(sub.shape[0]):
+        _save_single_grid_token_match_viz(
+            sub=sub[head_idx].numpy(),
+            img_a=img_a,
+            img_b=img_b,
+            output_path=head_dir / f"head_{head_idx:02d}.png",
+            patch_size=patch_size,
+            grid_w=grid_w,
+            grid_h=grid_h,
+            sample_rows=sample_rows,
+            sample_cols=sample_cols,
+            title=f"{base_title} (head {head_idx})",
+            dedup_tokens=dedup_tokens,
+        )
+
+
 def save_bias_patch_match_viz(
     bias: torch.Tensor,
     img_a: np.ndarray,
@@ -1427,8 +1667,8 @@ def triangular_layer_lambda(layers: Sequence[int], peak: float) -> Dict[int, flo
 # -----------------------------------------------------------------------------
 def build_argparser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="VGGT visualization + LightGlue tie-point prior injection")
-    parser.add_argument("--image_folder", type=str, default="experiments/test_data/sample01", help="Input image folder")
-    parser.add_argument("--output_dir", type=str, default="experiments/test_vggt01", help="Output directory")
+    parser.add_argument("--image_folder", type=str, default="experiments/test_data/sample4", help="Input image folder")
+    parser.add_argument("--output_dir", type=str, default="experiments/test_vggt43", help="Output directory")
     parser.add_argument("--device", type=str, default="cuda", help="Inference device; GPU strongly recommended")
     parser.add_argument("--machine", type=str, default="default", help="Hydra machine config")
     parser.add_argument("--model_name", type=str, default="vggt", help="Model config name")
@@ -1455,13 +1695,15 @@ def build_argparser() -> argparse.ArgumentParser:
     parser.add_argument("--min_views_per_track", type=int, default=2)
     parser.add_argument("--max_tracks_for_bias", type=int, default=1500)
 
-    parser.add_argument("--capture_layers", type=str, default="10,11,12,13,14,15,16")
+    parser.add_argument("--capture_layers", type=str, default="")
     parser.add_argument("--inject_layers", type=str, default="11, 13, 15", help="'middle' or comma separated global layer ids")
     parser.add_argument("--bias_lambda", type=float, default=2.0)
     parser.add_argument("--sigma_q", type=float, default=0.8, help="Gaussian spread in query patch grid")
     parser.add_argument("--sigma_k", type=float, default=0.8, help="Gaussian spread in key patch grid")
     parser.add_argument("--head_gains", type=str, default="", help="Comma-separated per-head gains; empty -> all ones")
-    parser.add_argument("--skip_global_layers", type=str, default="", help="Comma-separated global layer ids to skip entirely during forward")
+    # parser.add_argument("--skip_global_layers", type=str, default="2,3,4,5,6,7,8", help="Comma-separated global layer ids to skip entirely during forward")
+    parser.add_argument("--skip_global_layers", type=str, default="22,23,21,20", help="Comma-separated global layer ids to skip entirely during forward")
+
 
     # Keep the user's original CLI semantics.
     parser.add_argument("--run_baseline", action="store_false", help="Run baseline inference with attention capture")
@@ -1471,6 +1713,10 @@ def build_argparser() -> argparse.ArgumentParser:
     parser.add_argument("--pair_a", type=int, default=0, help="Query view index for patch-match visualization")
     parser.add_argument("--pair_b", type=int, default=1, help="Key view index for patch-match visualization")
     parser.add_argument("--topk_patch_matches", type=int, default=120)
+    parser.add_argument("--grid_match_rows", type=int, default=16, help="Regular sampling grid rows for token correspondence viz; <=0 disables")
+    parser.add_argument("--grid_match_cols", type=int, default=16, help="Regular sampling grid cols for token correspondence viz; <=0 disables")
+    parser.add_argument("--grid_match_save_per_head", action="store_true", help="Also save one grid-token match visualization per attention head")
+    parser.add_argument("--grid_match_dedup_tokens", action="store_true", help="When regular samples fall into the same token, keep only one sample per token")
 
     return parser
 
@@ -1709,6 +1955,25 @@ def main():
                     title=f"Baseline layer {layer_idx}: view {args.pair_a} -> view {args.pair_b}",
                     save_per_head=True,
                 )
+                if args.grid_match_rows > 0 and args.grid_match_cols > 0:
+                    save_attention_grid_token_match_viz(
+                        attn=attn,
+                        img_a=resized_rgbs[args.pair_a],
+                        img_b=resized_rgbs[args.pair_b],
+                        output_path=attn_dir / f"layer_{layer_idx:02d}_pair_{args.pair_a}_{args.pair_b}_grid_token_match.png",
+                        view_a=args.pair_a,
+                        view_b=args.pair_b,
+                        per_view_tokens=per_view_tokens,
+                        patch_start_idx=patch_start_idx,
+                        patch_size=patch_size,
+                        grid_w=grid_w,
+                        grid_h=grid_h,
+                        sample_rows=args.grid_match_rows,
+                        sample_cols=args.grid_match_cols,
+                        title=f"Baseline layer {layer_idx}: grid token matches {args.pair_a} -> {args.pair_b}",
+                        save_per_head=args.grid_match_save_per_head,
+                        dedup_tokens=args.grid_match_dedup_tokens,
+                    )
 
     # ------------------------------------------------------------------
     # Step 3: build tie-point prior matrix and inject into middle layers
@@ -1825,6 +2090,25 @@ def main():
                     title=f"Injected layer {layer_idx}: view {args.pair_a} -> view {args.pair_b}",
                     save_per_head=True,
                 )
+                if args.grid_match_rows > 0 and args.grid_match_cols > 0:
+                    save_attention_grid_token_match_viz(
+                        attn=attn,
+                        img_a=resized_rgbs[args.pair_a],
+                        img_b=resized_rgbs[args.pair_b],
+                        output_path=inj_attn_dir / f"layer_{layer_idx:02d}_pair_{args.pair_a}_{args.pair_b}_grid_token_match.png",
+                        view_a=args.pair_a,
+                        view_b=args.pair_b,
+                        per_view_tokens=per_view_tokens,
+                        patch_start_idx=patch_start_idx,
+                        patch_size=patch_size,
+                        grid_w=grid_w,
+                        grid_h=grid_h,
+                        sample_rows=args.grid_match_rows,
+                        sample_cols=args.grid_match_cols,
+                        title=f"Injected layer {layer_idx}: grid token matches {args.pair_a} -> {args.pair_b}",
+                        save_per_head=args.grid_match_save_per_head,
+                        dedup_tokens=args.grid_match_dedup_tokens,
+                    )
 
         # ----------------------------------------------------------
         # Compare baseline vs injected: did bias actually change logits/attn?
