@@ -1,0 +1,20 @@
+model_str: "vggt_midmatch"
+model_config:
+  name: "vggt_midmatch"
+  load_pretrained_weights: true
+  load_custom_ckpt: false
+  custom_ckpt_path: null
+  pretrained_model_name_or_path: "checkpoints/vggt"
+  data_norm_type: "identity"
+  torch_hub_force_reload: false
+
+  # Mid-layer matching branch
+  match_layer_indices: [11, 17]
+  match_inner_dim: 256
+  match_desc_dim: 256
+  match_fine_dim: 128
+  match_fine_stride: 4
+  match_split_frame_global: true
+  match_use_conf_head: true
+  match_use_fine_refine: true
+  match_return_for_inference: true
