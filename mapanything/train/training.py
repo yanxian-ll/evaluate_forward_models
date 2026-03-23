@@ -29,7 +29,7 @@ from torch.utils.tensorboard import SummaryWriter
 import mapanything.utils.train_tools as train_tools
 from mapanything.datasets import get_test_data_loader, get_train_data_loader
 from mapanything.models import init_model
-from mapanything.loss.losses import *  # noqa
+from mapanything.loss import *  # noqa
 from mapanything.utils.inference import loss_of_one_batch_multi_view
 from mapanything.utils.train_tools import NativeScalerWithGradNormCount as NativeScaler
 

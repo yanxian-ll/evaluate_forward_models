@@ -206,6 +206,10 @@ MODEL_CONFIGS = {
         "module": "mapanything.models.external.hunyuan",
         "class_name": "HunyuanWrapper",
     },
+    "vggt_midmatch": {
+        "module": "mapanything.models.external.vggt_midmatch",
+        "class_name": "VGGTMidMatchWrapper",
+    },
 }
 
 
