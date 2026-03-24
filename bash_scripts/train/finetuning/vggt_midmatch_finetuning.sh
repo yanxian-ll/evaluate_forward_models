@@ -22,21 +22,12 @@ export NCCL_P2P_NET_CHUNKSIZE=524288
 torchrun --nproc_per_node ${NUM_GPUS} \
   scripts/train.py \
   machine=aws \
-  dataset=uavtrain_a3dall_518_many_ar_16ipg_2g \
+  dataset=uavtrain_a3dsynl_bmvs_518_many_ar_16ipg_2g \
   dataset.num_workers=4 \
   dataset.num_views=16 \
   dataset.principal_point_centered=true \
   loss=vggt_midmatch_loss \
   model=vggt_midmatch \
-  model.model_config.pretrained_model_name_or_path="./checkpoints/vggt" \
-  model.model_config.match_layer_indices='[11,17]' \
-  model.model_config.match_inner_dim=256 \
-  model.model_config.match_desc_dim=256 \
-  model.model_config.match_fine_dim=128 \
-  model.model_config.match_fine_stride=4 \
-  model.model_config.match_split_frame_global=true \
-  model.model_config.match_use_conf_head=true \
-  model.model_config.match_use_fine_refine=true \
   train_params=vggt_finetune \
   train_params.epochs=10 \
   train_params.warmup_epochs=1 \

@@ -5,8 +5,6 @@ model_config:
   load_custom_ckpt: false
   custom_ckpt_path: null
   pretrained_model_name_or_path: "checkpoints/vggt"
-  data_norm_type: "identity"
-  torch_hub_force_reload: false
 
   # Mid-layer matching branch
   match_layer_indices: [11, 17]
@@ -18,3 +16,6 @@ model_config:
   match_use_conf_head: true
   match_use_fine_refine: true
   match_return_for_inference: true
+  
+data_norm_type: "identity"
+torch_hub_force_reload: false
