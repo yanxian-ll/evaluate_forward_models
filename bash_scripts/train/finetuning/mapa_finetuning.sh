@@ -28,7 +28,7 @@ export NCCL_P2P_NET_CHUNKSIZE=524288
 torchrun --nproc_per_node ${NUM_GPUS} \
     scripts/train.py \
     machine=aws \
-    dataset=uavtrain_a3dall_518_many_ar_16ipg_2g \
+    dataset=uavtrain_a3dsynl_bmvs_518_many_ar_16ipg_2g \
     dataset.num_workers=12 \
     dataset.num_views=16 \
     loss=overall_loss_weigh_pm_higher \

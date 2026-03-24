@@ -44,7 +44,7 @@ torch.hub.load = offline_torch_hub_load
 log = logging.getLogger(__name__)
 
 
-@hydra.main(version_base=None, config_path="../configs", config_name="debug_train_semantic")
+@hydra.main(version_base=None, config_path="../configs", config_name="train")
 def execute_training(cfg: DictConfig):
     """
     Execute the training process with the provided configuration.
