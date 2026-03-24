@@ -206,9 +206,15 @@ MODEL_CONFIGS = {
         "module": "mapanything.models.external.hunyuan",
         "class_name": "HunyuanWrapper",
     },
+    # 
     "vggt_midmatch": {
         "module": "mapanything.models.external.vggt_midmatch",
         "class_name": "VGGTMidMatchWrapper",
+    },
+    # 为 mapanything 添加一个独立的 camera head（参考DA3）
+    "mapanything_da3_camera_head": {
+        "module": "mapanything.models.external.mapanything_da3_camera_head",
+        "class_name": "MapAnythingDA3CameraHead",
     },
 }
 

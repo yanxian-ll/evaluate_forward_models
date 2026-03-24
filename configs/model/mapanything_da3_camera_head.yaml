@@ -1,0 +1,26 @@
+defaults:
+  - default
+  - encoder: dinov2_giant_24_layers
+  - info_sharing: aat_ifr_16_layers_dinov2_vitg_init
+  - pred_head: dpt_pose_scale
+  - task: images_only
+
+model_str: "mapanything_da3_camera_head"
+
+model_config:
+  name: "mapanything_da3_camera_head"
+  encoder_config: ${model.encoder}
+  info_sharing_config: ${model.info_sharing}
+  pred_head_config: ${model.pred_head}
+  geometric_input_config: ${model.task}
+  use_register_tokens_from_encoder: True
+  info_sharing_mlp_layer_str: "swiglufused"
+
+  camera_mode: "fx_fy"
+  principal_point_mode: "image_center"
+  camera_log_scale_min: -6.0
+  camera_log_scale_max: 6.0
+  camera_head_config:
+    output_dim: 2
+
+data_norm_type: ${model.encoder.data_norm_type}

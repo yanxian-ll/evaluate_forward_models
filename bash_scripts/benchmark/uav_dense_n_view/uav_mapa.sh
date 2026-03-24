@@ -10,12 +10,12 @@ export HYDRA_FULL_ERROR=1
 
 # batch size, views, dataset, seed
 batch_sizes_and_views=(
-    "15 2 benchmark_518_usegeo_synl 2"
-    "10 4 benchmark_518_usegeo_synl 4"
-    "5 8 benchmark_518_usegeo_synl 8"
-    "2 16 benchmark_518_usegeo_synl 16"
-    "1 24 benchmark_518_usegeo_synl 24"
-    "1 32 benchmark_518_usegeo_synl 32"
+    "15 2 benchmark_518_usegeo_synl_bmvs 2"
+    "10 4 benchmark_518_usegeo_synl_bmvs 4"
+    "5 8 benchmark_518_usegeo_synl_bmvs 8"
+    "2 16 benchmark_518_usegeo_synl_bmvs 16"
+    "1 24 benchmark_518_usegeo_synl_bmvs 24"
+    "1 32 benchmark_518_usegeo_synl_bmvs 32"
 )
 
 # Loop through each combination
@@ -38,8 +38,9 @@ for combo in "${batch_sizes_and_views[@]}"; do
         model=mapanything_v1 \
         model/task=images_only \
         model.encoder.uses_torch_hub=false \
-        model.pretrained='${root_experiments_dir}/mapanything/training_ablations/synl_only/checkpoint-best.pth' \
+        model.pretrained='${root_experiments_dir}/mapanything/training_ablations/synl_bmvs/checkpoint-last.pth' \
         hydra.run.dir='${root_experiments_dir}/mapanything/benchmarking/dense_'"${num_views}"'_view/uav_mapa'
 
     echo "Finished running $dataset with batch_size=$batch_size and num_views=$num_views"
 done
+

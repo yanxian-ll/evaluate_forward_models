@@ -11,8 +11,6 @@ Extended VGGT test script with:
 6. Delta-logits / delta-attention comparison between injected and baseline runs.
 7. Regular-grid token correspondence visualization from global attention.
 
-This file is intended to be dropped into `scripts/test_vggt.py` with minimal
-repository intrusion.
 """
 
 from __future__ import annotations
